@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -119,18 +120,111 @@ func extractRefreshToken(bizExt string) (string, error) {
 			return "", fmt.Errorf("bizExt 解码失败: %w", err)
 		}
 	}
+
+	// 诊断:打印结构(字段名+类型+长度,不打印敏感值),便于定位真正的 refresh_token。
+	logBizExtShape(decoded)
+
 	var payload struct {
-		PdsLoginResult struct {
-			RefreshToken string `json:"refreshToken"`
-		} `json:"pds_login_result"`
+		PdsLoginResult json.RawMessage `json:"pds_login_result"`
 	}
 	if err := json.Unmarshal(decoded, &payload); err != nil {
 		return "", fmt.Errorf("bizExt JSON 解析失败: %w", err)
 	}
-	if payload.PdsLoginResult.RefreshToken == "" {
+	// pds_login_result 可能是对象,也可能是被再编码的 JSON 字符串。
+	inner := payload.PdsLoginResult
+	if len(inner) > 0 && inner[0] == '"' {
+		var s string
+		if err := json.Unmarshal(inner, &s); err == nil {
+			inner = json.RawMessage(s)
+		}
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(inner, &fields); err != nil {
+		return "", fmt.Errorf("pds_login_result 解析失败: %w", err)
+	}
+	// 优先 refreshToken;若缺失或过短(疑似取到短标识),再挑最像 token 的长字符串字段。
+	rt := jsonString(fields["refreshToken"])
+	if len(rt) < 40 {
+		rt = pickTokenLike(fields, rt)
+	}
+	if rt == "" {
 		return "", fmt.Errorf("bizExt 内未找到 refreshToken")
 	}
-	return payload.PdsLoginResult.RefreshToken, nil
+	return rt, nil
+}
+
+// logBizExtShape 打印顶层 + pds_login_result 的字段名/类型/长度(不含值)。
+func logBizExtShape(decoded []byte) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(decoded, &top); err != nil {
+		log.Printf("[aliauth] bizExt 顶层非对象或解析失败,总长=%d", len(decoded))
+		return
+	}
+	log.Printf("[aliauth] bizExt 顶层字段: %s", describeKeys(top))
+	inner := top["pds_login_result"]
+	if len(inner) > 0 && inner[0] == '"' {
+		var s string
+		if json.Unmarshal(inner, &s) == nil {
+			inner = json.RawMessage(s)
+		}
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(inner, &fields) == nil {
+		log.Printf("[aliauth] pds_login_result 字段: %s", describeKeys(fields))
+	}
+}
+
+// describeKeys 返回 "key(type,len) key(type,len) ..." —— 仅字符串类型给出长度,不泄露值。
+func describeKeys(m map[string]json.RawMessage) string {
+	var b strings.Builder
+	for k, v := range m {
+		t := "?"
+		n := 0
+		if len(v) > 0 {
+			switch v[0] {
+			case '"':
+				t = "str"
+				var s string
+				_ = json.Unmarshal(v, &s)
+				n = len(s)
+			case '{':
+				t = "obj"
+			case '[':
+				t = "arr"
+			case 't', 'f':
+				t = "bool"
+			default:
+				t = "num"
+			}
+		}
+		fmt.Fprintf(&b, "%s(%s,%d) ", k, t, n)
+	}
+	return b.String()
+}
+
+// pickTokenLike 在字段里挑一个最像 refresh token 的长字符串(排除已知的短标识)。
+func pickTokenLike(fields map[string]json.RawMessage, cur string) string {
+	best := cur
+	for k, v := range fields {
+		lk := strings.ToLower(k)
+		if !strings.Contains(lk, "token") || strings.Contains(lk, "access") {
+			continue // 只看 *token* 字段,排除 accessToken
+		}
+		s := jsonString(v)
+		if len(s) > len(best) {
+			best = s
+		}
+	}
+	return best
+}
+
+func jsonString(v json.RawMessage) string {
+	if len(v) == 0 || v[0] != '"' {
+		return ""
+	}
+	var s string
+	_ = json.Unmarshal(v, &s)
+	return s
 }
 
 func truncate(b []byte) string {
