@@ -19,3 +19,6 @@ data/
 .claude/
 .vscode/
 web/tsconfig.tsbuildinfo
+
+# 本地资源清单(小雅公共分享导出),不提交
+resources/
