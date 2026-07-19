@@ -1,16 +1,25 @@
 import { Link, useSearchParams } from "react-router-dom";
 import Player from "../components/Player";
+import type { Source } from "../api";
 
 export default function Watch() {
   const [params] = useSearchParams();
+  const source = (params.get("source") || "openlist") as Source;
   const path = params.get("path") || "";
-  const name = path.split("/").pop() || "视频";
+  const id = params.get("id") || "";
+  const name = params.get("name") || path.split("/").pop() || "视频";
 
-  if (!path) {
-    return <p className="muted">缺少视频路径。</p>;
+  // 按来源构造后端播放地址。
+  let streamUrl = "";
+  if (source === "jellyfin" && id) {
+    streamUrl = `/api/stream?source=jellyfin&id=${encodeURIComponent(id)}`;
+  } else if (source === "openlist" && path) {
+    streamUrl = `/api/stream?source=openlist&path=${encodeURIComponent(path)}`;
   }
 
-  const streamUrl = `/api/stream?path=${encodeURIComponent(path)}`;
+  if (!streamUrl) {
+    return <p className="muted">缺少视频参数。</p>;
+  }
 
   return (
     <div>
@@ -21,7 +30,7 @@ export default function Watch() {
       </div>
       <Player src={streamUrl} name={name} />
       <h2 style={{ marginTop: 16 }}>{name}</h2>
-      <p className="muted">{path}</p>
+      <p className="muted">来源：{source === "jellyfin" ? "Jellyfin 影库" : "网盘文件"}</p>
     </div>
   );
 }

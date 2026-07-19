@@ -3,6 +3,8 @@ node_modules/
 web/dist/
 server/ivideo-server
 server/bin/
+server/ivideo.db
+*.db
 
 # 运行数据
 data/
@@ -16,3 +18,4 @@ data/
 
 .claude/
 .vscode/
+web/tsconfig.tsbuildinfo

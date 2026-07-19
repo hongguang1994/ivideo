@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import type { VideoItem } from "../api";
 
 // 格式化文件大小
-function humanSize(n: number): string {
+function humanSize(n?: number): string {
   if (!n) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
@@ -12,6 +12,14 @@ function humanSize(n: number): string {
     i++;
   }
   return `${v.toFixed(1)} ${units[i]}`;
+}
+
+// 根据条目构造播放页链接（区分 openlist / jellyfin）。
+function watchLink(item: VideoItem): string {
+  const params = new URLSearchParams({ source: item.source, name: item.name });
+  if (item.source === "jellyfin" && item.id) params.set("id", item.id);
+  if (item.source === "openlist" && item.path) params.set("path", item.path);
+  return `/watch?${params.toString()}`;
 }
 
 export default function VideoCard({
@@ -24,8 +32,8 @@ export default function VideoCard({
   const inner = (
     <>
       <div className="thumb">
-        {item.thumb ? (
-          <img className="thumb" src={item.thumb} alt={item.name} />
+        {item.poster ? (
+          <img className="thumb" src={item.poster} alt={item.name} loading="lazy" />
         ) : item.isDir ? (
           "📁"
         ) : (
@@ -35,22 +43,27 @@ export default function VideoCard({
       <div className="meta">
         <div className="title">{item.name}</div>
         <div className="sub">
-          {item.isDir ? "目录" : humanSize(item.size)}
+          {item.isDir
+            ? "目录"
+            : item.source === "jellyfin"
+              ? item.year || "影片"
+              : humanSize(item.size)}
         </div>
       </div>
     </>
   );
 
-  if (item.isDir) {
+  // OpenList 目录：点击进入下一层
+  if (item.isDir && item.path) {
     return (
-      <div className="card" onClick={() => onOpenDir(item.path)} style={{ cursor: "pointer" }}>
+      <div className="card" onClick={() => onOpenDir(item.path!)} style={{ cursor: "pointer" }}>
         {inner}
       </div>
     );
   }
 
   return (
-    <Link className="card" to={`/watch?path=${encodeURIComponent(item.path)}`}>
+    <Link className="card" to={watchLink(item)}>
       {inner}
     </Link>
   );

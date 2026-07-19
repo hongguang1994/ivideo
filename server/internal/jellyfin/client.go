@@ -1,0 +1,95 @@
+// Package jellyfin 是 Jellyfin 媒体服务器 REST API 的最小客户端，
+// 负责列出片库条目、取海报图、取播放流地址。鉴权用后台生成的 API Key。
+package jellyfin
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
+)
+
+// Client 封装对 Jellyfin 的调用。
+type Client struct {
+	baseURL string
+	apiKey  string
+	http    *http.Client
+}
+
+// New 创建 Jellyfin 客户端。
+func New(baseURL, apiKey string) *Client {
+	return &Client{
+		baseURL: baseURL,
+		apiKey:  apiKey,
+		http:    &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// Item 对应 Jellyfin 条目的部分字段。
+type Item struct {
+	ID             string            `json:"Id"`
+	Name           string            `json:"Name"`
+	Type           string            `json:"Type"`
+	Overview       string            `json:"Overview"`
+	ProductionYear int               `json:"ProductionYear"`
+	ImageTags      map[string]string `json:"ImageTags"`
+}
+
+// itemsResp 是 /Items 的响应结构。
+type itemsResp struct {
+	Items            []Item `json:"Items"`
+	TotalRecordCount int    `json:"TotalRecordCount"`
+}
+
+// Items 列出片库中的条目。itemTypes 例如 "Movie" 或 "Movie,Series"。
+func (c *Client) Items(itemTypes string) ([]Item, error) {
+	if itemTypes == "" {
+		itemTypes = "Movie"
+	}
+	q := url.Values{}
+	q.Set("Recursive", "true")
+	q.Set("IncludeItemTypes", itemTypes)
+	q.Set("Fields", "Overview,ProductionYear")
+	q.Set("SortBy", "SortName")
+	q.Set("SortOrder", "Ascending")
+
+	var out itemsResp
+	if err := c.getJSON("/Items?"+q.Encode(), &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
+// ImageURL 返回某条目主海报的内部访问地址（带 api_key，供后端代理拉取）。
+func (c *Client) ImageURL(id string) string {
+	return fmt.Sprintf("%s/Items/%s/Images/Primary?api_key=%s", c.baseURL, id, url.QueryEscape(c.apiKey))
+}
+
+// StreamURL 返回某条目的直连播放地址（供后端代理转发）。
+func (c *Client) StreamURL(id string) string {
+	return fmt.Sprintf("%s/Videos/%s/stream?static=true&api_key=%s", c.baseURL, id, url.QueryEscape(c.apiKey))
+}
+
+// getJSON 带 API Key 发起 GET 并解 JSON。
+func (c *Client) getJSON(path string, out any) error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Emby-Token", c.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("jellyfin: 接口返回 %d: %s", resp.StatusCode, string(body))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
