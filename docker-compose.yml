@@ -6,6 +6,9 @@ services:
     image: openlistteam/openlist:latest
     container_name: ivideo-openlist
     restart: unless-stopped
+    # OpenList v4.1.0+ 会校验数据目录可写；数据卷为 root 所有，
+    # 故以 root 运行避免权限报错（官方文档推荐做法）。
+    user: "0:0"
     ports:
       - "5244:5244"
     volumes:
