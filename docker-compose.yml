@@ -1,0 +1,39 @@
+services:
+  # OpenList：挂载各类网盘，提供文件列表与直链。
+  # 首次启动后到 http://<服务器IP>:5244 用 admin 登录并配置网盘。
+  # 初始管理员密码见容器日志：docker compose logs openlist | grep -i password
+  openlist:
+    image: openlistteam/openlist:latest
+    container_name: ivideo-openlist
+    restart: unless-stopped
+    ports:
+      - "5244:5244"
+    volumes:
+      - ./data/openlist:/opt/openlist/data
+    environment:
+      - TZ=Asia/Shanghai
+
+  # Go + Gin 后端：读取 OpenList 目录，代理视频流。
+  server:
+    build: ./server
+    container_name: ivideo-server
+    restart: unless-stopped
+    environment:
+      - SERVER_PORT=3001
+      - OPENLIST_BASE_URL=http://openlist:5244
+      - OPENLIST_USERNAME=${OPENLIST_USERNAME:-admin}
+      - OPENLIST_PASSWORD=${OPENLIST_PASSWORD:-}
+      - OPENLIST_ROOT=${OPENLIST_ROOT:-/}
+      - GIN_MODE=release
+    depends_on:
+      - openlist
+
+  # 前端 + nginx 网关：唯一对外入口。
+  web:
+    build: ./web
+    container_name: ivideo-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
