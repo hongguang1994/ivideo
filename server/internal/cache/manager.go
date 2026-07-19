@@ -11,8 +11,8 @@ import (
 
 // Manager 负责“确保已转存”的编排：点播 → 若未缓存则后台转存（并发去重）→ 就绪后给直链。
 type Manager struct {
-	store   *store.Store
-	backend CacheBackend
+	store    *store.Store
+	backend  CacheBackend
 	cacheDir string
 
 	mu       sync.Mutex

@@ -26,7 +26,14 @@ type Config struct {
 	CacheTTLHours      int    // 超过多久没看就清理
 	CacheCleanInterval int    // 清理任务间隔（分钟）
 
-	AliyunRefreshToken string // 阿里云盘（小号）refresh token，供 aliyun 适配器用
+	// ---- 阿里云盘适配器（Share2Open 转存缓存）----
+	AliyunRefreshToken     string // web 接口 refresh token（小雅的 mytoken.txt），用于转存/分享token
+	AliyunOpenRefreshToken string // 开放接口 refresh token（小雅的 myopentoken.txt），用于取直链
+	AliyunOpenClientID     string // 开放平台应用 client_id
+	AliyunOpenClientSecret string // 开放平台应用 client_secret
+	AliyunOpenTokenURL     string // 开放接口换 token 的地址
+	AliyunTempFolderID     string // 转存目标临时目录的 file_id（小雅的 temp_transfer_folder_id）
+	AliyunDriveID          string // 自己盘 drive_id，留空则从 web token 自动获取
 
 	// VideoExts 认定为视频的扩展名（小写，含点），用于过滤目录项。
 	VideoExts []string
@@ -55,7 +62,13 @@ func Load() Config {
 		CacheTTLHours:      envInt("CACHE_TTL_HOURS", 72),
 		CacheCleanInterval: envInt("CACHE_CLEAN_INTERVAL_MINUTES", 10),
 
-		AliyunRefreshToken: env("ALIYUN_REFRESH_TOKEN", ""),
+		AliyunRefreshToken:     env("ALIYUN_REFRESH_TOKEN", ""),
+		AliyunOpenRefreshToken: env("ALIYUN_OPEN_REFRESH_TOKEN", ""),
+		AliyunOpenClientID:     env("ALIYUN_OPEN_CLIENT_ID", ""),
+		AliyunOpenClientSecret: env("ALIYUN_OPEN_CLIENT_SECRET", ""),
+		AliyunOpenTokenURL:     env("ALIYUN_OPEN_TOKEN_URL", "https://openapi.alipan.com/oauth/access_token"),
+		AliyunTempFolderID:     env("ALIYUN_TEMP_FOLDER_ID", "root"),
+		AliyunDriveID:          env("ALIYUN_DRIVE_ID", ""),
 
 		VideoExts: []string{".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".m4v", ".ts"},
 	}

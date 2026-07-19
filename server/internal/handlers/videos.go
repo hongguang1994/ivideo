@@ -9,11 +9,11 @@ import (
 
 // Video 是返回给前端的视频/目录条目，兼容 OpenList 与 Jellyfin 两种来源。
 type Video struct {
-	Source    string `json:"source"`              // "openlist" 或 "jellyfin"
+	Source    string `json:"source"` // "openlist" 或 "jellyfin"
 	Name      string `json:"name"`
-	Path      string `json:"path,omitempty"`      // OpenList：相对视频根目录的路径
-	ID        string `json:"id,omitempty"`        // Jellyfin：条目 ID
-	IsDir     bool   `json:"isDir"`               // OpenList 目录用于层级浏览
+	Path      string `json:"path,omitempty"` // OpenList：相对视频根目录的路径
+	ID        string `json:"id,omitempty"`   // Jellyfin：条目 ID
+	IsDir     bool   `json:"isDir"`          // OpenList 目录用于层级浏览
 	Size      int64  `json:"size,omitempty"`
 	Modified  string `json:"modified,omitempty"`
 	Poster    string `json:"poster,omitempty"`    // 海报地址（经后端代理）

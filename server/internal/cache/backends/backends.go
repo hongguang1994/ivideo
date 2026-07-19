@@ -14,7 +14,7 @@ func New(cfg config.Config) (cache.CacheBackend, error) {
 	case "fake", "":
 		return NewFake(), nil
 	case "aliyun":
-		return NewAliyun(cfg.AliyunRefreshToken, cfg.CacheDir), nil
+		return NewAliyun(cfg), nil
 	default:
 		return nil, fmt.Errorf("未知缓存盘适配器: %s", cfg.CacheBackend)
 	}
