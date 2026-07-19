@@ -202,6 +202,65 @@ func (s *Store) ListReady() ([]CacheItem, error) {
 	return out, rows.Err()
 }
 
+// ---- 网盘凭据 ----
+
+// Credential 是一个网盘的凭据。
+type Credential struct {
+	Provider  string `json:"provider"`
+	Token     string `json:"token"`
+	Extra     string `json:"extra"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// GetCredential 取某网盘凭据；不存在返回零值 + found=false。
+func (s *Store) GetCredential(provider string) (Credential, bool, error) {
+	var c Credential
+	err := s.db.QueryRow(
+		`SELECT provider, token, extra, updated_at FROM credentials WHERE provider = ?`, provider).
+		Scan(&c.Provider, &c.Token, &c.Extra, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return Credential{Provider: provider}, false, nil
+	}
+	return c, err == nil, err
+}
+
+// SetCredential 写入/更新某网盘凭据。
+func (s *Store) SetCredential(provider, token, extra string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, extra=excluded.extra, updated_at=excluded.updated_at`,
+		provider, token, extra, time.Now().Unix())
+	return err
+}
+
+// SetCredentialToken 只更新 token（用于 token 轮换时保存新值，不动 extra）。
+func (s *Store) SetCredentialToken(provider, token string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO credentials (provider, token, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, updated_at=excluded.updated_at`,
+		provider, token, time.Now().Unix())
+	return err
+}
+
+// ListCredentialProviders 返回已配置凭据的网盘列表（不含 token 值，仅状态）。
+func (s *Store) ListCredentialProviders() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT provider, token != '' FROM credentials`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var p string
+		var ok bool
+		if err := rows.Scan(&p, &ok); err != nil {
+			return nil, err
+		}
+		out[p] = ok
+	}
+	return out, rows.Err()
+}
+
 // upsertStatus 是只改状态/错误的通用 upsert。
 func (s *Store) upsertStatus(resourceID int64, backend, status, errMsg string) error {
 	now := time.Now().Unix()

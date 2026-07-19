@@ -11,17 +11,19 @@ import (
 	"time"
 )
 
-// 阿里云盘接口地址。
+// 阿里云盘 web 接口地址（纯 web 单套，配合扫码拿到的 refresh_token）。
 const (
 	aliWebTokenURL   = "https://auth.alipan.com/v2/account/token"             // web refresh → access token
 	aliShareTokenURL = "https://api.alipan.com/v2/share_link/get_share_token" // 分享 token
 	aliShareListURL  = "https://api.alipan.com/adrive/v3/file/list"           // 列分享内文件
 	aliCopyURL       = "https://api.alipan.com/adrive/v2/file/copy"           // 转存(分享→自己盘)
-	aliOpenBase      = "https://openapi.alipan.com"                           // 开放接口
+	aliDownloadURL   = "https://api.alipan.com/v2/file/get_download_url"      // 取直链
+	aliDeleteURL     = "https://api.alipan.com/v3/file/delete"               // 删除(进回收站)
+	aliClearTrashURL = "https://api.alipan.com/v2/recyclebin/clear"          // 清空回收站
 )
 
-// doJSON 发一个 JSON 请求并把响应 data 解到 out；非 2xx 返回带响应体的错误。
-func (a *Aliyun) doJSON(ctx context.Context, method, url string, headers map[string]string, body, out any) error {
+// doJSON 发一个 JSON 请求并把响应解到 out；非 2xx 返回带响应体的错误。
+func (a *Aliyun) doJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -30,7 +32,7 @@ func (a *Aliyun) doJSON(ctx context.Context, method, url string, headers map[str
 		}
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rd)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, rd)
 	if err != nil {
 		return err
 	}
@@ -45,7 +47,7 @@ func (a *Aliyun) doJSON(ctx context.Context, method, url string, headers map[str
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("阿里接口 %s 返回 %d: %s", url, resp.StatusCode, string(raw))
+		return fmt.Errorf("阿里接口 %s 返回 %d: %s", url, resp.StatusCode, truncateBody(raw))
 	}
 	if out != nil && len(raw) > 0 {
 		return json.Unmarshal(raw, out)
@@ -53,15 +55,30 @@ func (a *Aliyun) doJSON(ctx context.Context, method, url string, headers map[str
 	return nil
 }
 
-// refreshWeb 用 web refresh token 换 access token，并记录自己盘 drive_id。
-func (a *Aliyun) refreshWeb(ctx context.Context) (string, error) {
+// currentRefreshToken 优先用库里(扫码写入)的 token，回退到配置。
+func (a *Aliyun) currentRefreshToken() string {
+	if a.tokens != nil {
+		if t := a.tokens.GetToken("aliyun"); t != "" {
+			return t
+		}
+	}
+	return a.webRT
+}
+
+// webToken 用 refresh token 换 access token，并记录自己盘 drive_id。
+func (a *Aliyun) webToken(ctx context.Context) (string, error) {
 	a.mu.Lock()
-	if a.webTok != "" && time.Now().Before(a.webExp) {
-		tok := a.webTok
+	if a.accessTok != "" && time.Now().Before(a.accessExp) {
+		tok := a.accessTok
 		a.mu.Unlock()
 		return tok, nil
 	}
 	a.mu.Unlock()
+
+	rt := a.currentRefreshToken()
+	if rt == "" {
+		return "", fmt.Errorf("阿里云盘未授权，请先在设置页扫码登录")
+	}
 
 	var out struct {
 		AccessToken     string `json:"access_token"`
@@ -70,20 +87,17 @@ func (a *Aliyun) refreshWeb(ctx context.Context) (string, error) {
 		DefaultDriveID  string `json:"default_drive_id"`
 		ResourceDriveID string `json:"resource_drive_id"`
 	}
-	body := map[string]string{"grant_type": "refresh_token", "refresh_token": a.webRT}
-	if err := a.doJSON(ctx, http.MethodPost, aliWebTokenURL, nil, body, &out); err != nil {
-		return "", fmt.Errorf("刷新 web token 失败: %w", err)
+	body := map[string]string{"grant_type": "refresh_token", "refresh_token": rt}
+	if err := a.doJSON(ctx, aliWebTokenURL, nil, body, &out); err != nil {
+		return "", fmt.Errorf("刷新 token 失败: %w", err)
 	}
 	if out.AccessToken == "" {
-		return "", fmt.Errorf("刷新 web token 未返回 access_token")
+		return "", fmt.Errorf("刷新 token 未返回 access_token")
 	}
 
 	a.mu.Lock()
-	a.webTok = out.AccessToken
-	a.webExp = time.Now().Add(time.Duration(max(out.ExpiresIn-60, 60)) * time.Second)
-	if out.RefreshToken != "" {
-		a.webRT = out.RefreshToken // 阿里 refresh token 会轮换（仅内存保存，见 aliyun.go 说明）
-	}
+	a.accessTok = out.AccessToken
+	a.accessExp = time.Now().Add(time.Duration(max(out.ExpiresIn-60, 60)) * time.Second)
 	if a.driveID == "" {
 		if out.ResourceDriveID != "" {
 			a.driveID = out.ResourceDriveID
@@ -91,57 +105,25 @@ func (a *Aliyun) refreshWeb(ctx context.Context) (string, error) {
 			a.driveID = out.DefaultDriveID
 		}
 	}
-	tok := a.webTok
 	a.mu.Unlock()
-	return tok, nil
+
+	// refresh token 会轮换，回写库/内存。
+	if out.RefreshToken != "" && out.RefreshToken != rt {
+		a.webRT = out.RefreshToken
+		if a.tokens != nil {
+			_ = a.tokens.SaveToken("aliyun", out.RefreshToken)
+		}
+	}
+	return out.AccessToken, nil
 }
 
-// refreshOpen 用开放接口 refresh token 换 access token。
-func (a *Aliyun) refreshOpen(ctx context.Context) (string, error) {
-	a.mu.Lock()
-	if a.openTok != "" && time.Now().Before(a.openExp) {
-		tok := a.openTok
-		a.mu.Unlock()
-		return tok, nil
-	}
-	a.mu.Unlock()
-
-	var out struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
-	body := map[string]string{
-		"client_id":     a.clientID,
-		"client_secret": a.clientSecret,
-		"grant_type":    "refresh_token",
-		"refresh_token": a.openRT,
-	}
-	if err := a.doJSON(ctx, http.MethodPost, a.openTokenURL, nil, body, &out); err != nil {
-		return "", fmt.Errorf("刷新 open token 失败: %w", err)
-	}
-	if out.AccessToken == "" {
-		return "", fmt.Errorf("刷新 open token 未返回 access_token")
-	}
-
-	a.mu.Lock()
-	a.openTok = out.AccessToken
-	a.openExp = time.Now().Add(time.Duration(max(out.ExpiresIn-60, 60)) * time.Second)
-	if out.RefreshToken != "" {
-		a.openRT = out.RefreshToken
-	}
-	tok := a.openTok
-	a.mu.Unlock()
-	return tok, nil
-}
-
-// shareToken 取某分享的访问 token（后续列表/转存要带 x-share-token）。
+// shareToken 取某分享的访问 token。
 func (a *Aliyun) shareToken(ctx context.Context, shareID, sharePwd string) (string, error) {
 	var out struct {
 		ShareToken string `json:"share_token"`
 	}
 	body := map[string]string{"share_id": shareID, "share_pwd": sharePwd}
-	if err := a.doJSON(ctx, http.MethodPost, aliShareTokenURL, nil, body, &out); err != nil {
+	if err := a.doJSON(ctx, aliShareTokenURL, nil, body, &out); err != nil {
 		return "", err
 	}
 	if out.ShareToken == "" {
@@ -154,16 +136,16 @@ func (a *Aliyun) shareToken(ctx context.Context, shareID, sharePwd string) (stri
 type shareItem struct {
 	FileID string `json:"file_id"`
 	Name   string `json:"name"`
-	Type   string `json:"type"` // file / folder
+	Type   string `json:"type"`
 	Size   int64  `json:"size"`
 }
 
 // listShare 列出分享内某目录，自动翻页。
-func (a *Aliyun) listShare(ctx context.Context, shareID, shareToken, parentID string) ([]shareItem, error) {
+func (a *Aliyun) listShare(ctx context.Context, shareID, shareTok, parentID string) ([]shareItem, error) {
 	if parentID == "" {
 		parentID = "root"
 	}
-	headers := map[string]string{"x-share-token": shareToken}
+	headers := map[string]string{"x-share-token": shareTok}
 	var items []shareItem
 	marker := ""
 	for {
@@ -181,7 +163,7 @@ func (a *Aliyun) listShare(ctx context.Context, shareID, shareToken, parentID st
 			Items      []shareItem `json:"items"`
 			NextMarker string      `json:"next_marker"`
 		}
-		if err := a.doJSON(ctx, http.MethodPost, aliShareListURL, headers, body, &out); err != nil {
+		if err := a.doJSON(ctx, aliShareListURL, headers, body, &out); err != nil {
 			return nil, err
 		}
 		items = append(items, out.Items...)
@@ -193,16 +175,15 @@ func (a *Aliyun) listShare(ctx context.Context, shareID, shareToken, parentID st
 	return items, nil
 }
 
-// resolveFileID 把分享内的相对路径解析成 file_id，并返回大小。
-// path 形如 "/电影/xxx.mp4"；为空则报错（必须指到具体文件）。
-func (a *Aliyun) resolveFileID(ctx context.Context, shareID, shareToken, path string) (string, int64, error) {
+// resolveFileID 把分享内相对路径解析成 file_id，并返回大小。
+func (a *Aliyun) resolveFileID(ctx context.Context, shareID, shareTok, path string) (string, int64, error) {
 	segs := splitPath(path)
 	if len(segs) == 0 {
 		return "", 0, fmt.Errorf("分享内文件路径为空")
 	}
 	parent := "root"
 	for i, seg := range segs {
-		items, err := a.listShare(ctx, shareID, shareToken, parent)
+		items, err := a.listShare(ctx, shareID, shareTok, parent)
 		if err != nil {
 			return "", 0, err
 		}
@@ -225,10 +206,10 @@ func (a *Aliyun) resolveFileID(ctx context.Context, shareID, shareToken, path st
 }
 
 // copyFromShare 把分享内文件转存到自己盘临时目录，返回新 file_id。
-func (a *Aliyun) copyFromShare(ctx context.Context, webTok, shareID, shareToken, fileID string) (string, error) {
+func (a *Aliyun) copyFromShare(ctx context.Context, accessTok, shareID, shareTok, fileID string) (string, error) {
 	headers := map[string]string{
-		"Authorization": "Bearer " + webTok,
-		"x-share-token": shareToken,
+		"Authorization": "Bearer " + accessTok,
+		"x-share-token": shareTok,
 	}
 	body := map[string]any{
 		"file_id":           fileID,
@@ -241,24 +222,23 @@ func (a *Aliyun) copyFromShare(ctx context.Context, webTok, shareID, shareToken,
 		FileID      string `json:"file_id"`
 		AsyncTaskID string `json:"async_task_id"`
 	}
-	if err := a.doJSON(ctx, http.MethodPost, aliCopyURL, headers, body, &out); err != nil {
+	if err := a.doJSON(ctx, aliCopyURL, headers, body, &out); err != nil {
 		return "", err
 	}
 	if out.FileID != "" {
 		return out.FileID, nil // 秒传/同步完成
 	}
-	// 非秒传会返回异步任务，需轮询 async_task；首版暂不处理。
 	return "", fmt.Errorf("转存返回异步任务(async_task_id=%s)，该文件非秒传，首版暂未支持轮询", out.AsyncTaskID)
 }
 
-// openDownloadURL 用开放接口取自己盘文件的可播直链。
-func (a *Aliyun) openDownloadURL(ctx context.Context, openTok, fileID string) (string, error) {
-	headers := map[string]string{"Authorization": "Bearer " + openTok}
-	body := map[string]any{"drive_id": a.driveID, "file_id": fileID, "expire_sec": 14400}
+// downloadURL 取自己盘文件的可播直链。
+func (a *Aliyun) downloadURL(ctx context.Context, accessTok, fileID string) (string, error) {
+	headers := map[string]string{"Authorization": "Bearer " + accessTok}
+	body := map[string]any{"drive_id": a.driveID, "file_id": fileID}
 	var out struct {
 		URL string `json:"url"`
 	}
-	if err := a.doJSON(ctx, http.MethodPost, aliOpenBase+"/adrive/v1.0/openFile/getDownloadUrl", headers, body, &out); err != nil {
+	if err := a.doJSON(ctx, aliDownloadURL, headers, body, &out); err != nil {
 		return "", err
 	}
 	if out.URL == "" {
@@ -267,26 +247,18 @@ func (a *Aliyun) openDownloadURL(ctx context.Context, openTok, fileID string) (s
 	return out.URL, nil
 }
 
-// openDelete 用开放接口永久删除自己盘文件（跳过回收站）。
-func (a *Aliyun) openDelete(ctx context.Context, openTok, fileID string) error {
-	headers := map[string]string{"Authorization": "Bearer " + openTok}
+// deleteFile 删除自己盘文件（进回收站）。
+func (a *Aliyun) deleteFile(ctx context.Context, accessTok, fileID string) error {
+	headers := map[string]string{"Authorization": "Bearer " + accessTok}
 	body := map[string]any{"drive_id": a.driveID, "file_id": fileID}
-	return a.doJSON(ctx, http.MethodPost, aliOpenBase+"/adrive/v1.0/openFile/delete", headers, body, nil)
+	return a.doJSON(ctx, aliDeleteURL, headers, body, nil)
 }
 
-// openSpaceInfo 查询自己盘空间用量。
-func (a *Aliyun) openSpaceInfo(ctx context.Context, openTok string) (used, total int64, err error) {
-	headers := map[string]string{"Authorization": "Bearer " + openTok}
-	var out struct {
-		PersonalSpaceInfo struct {
-			UsedSize  int64 `json:"used_size"`
-			TotalSize int64 `json:"total_size"`
-		} `json:"personal_space_info"`
-	}
-	if err = a.doJSON(ctx, http.MethodPost, aliOpenBase+"/adrive/v1.0/openFile/getSpaceInfo", headers, map[string]any{}, &out); err != nil {
-		return 0, 0, err
-	}
-	return out.PersonalSpaceInfo.UsedSize, out.PersonalSpaceInfo.TotalSize, nil
+// clearTrash 清空回收站，真正释放配额。
+func (a *Aliyun) clearTrash(ctx context.Context, accessTok string) error {
+	headers := map[string]string{"Authorization": "Bearer " + accessTok}
+	body := map[string]any{"drive_id": a.driveID}
+	return a.doJSON(ctx, aliClearTrashURL, headers, body, nil)
 }
 
 // splitPath 把 "/a/b/c" 切成 [a b c]。
@@ -298,4 +270,11 @@ func splitPath(p string) []string {
 		}
 	}
 	return out
+}
+
+func truncateBody(b []byte) string {
+	if len(b) > 300 {
+		return string(b[:300]) + "…"
+	}
+	return string(b)
 }

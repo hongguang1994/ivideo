@@ -29,7 +29,7 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 	}
 
 	// 缓存盘适配器 + 管理器 + 清理任务。
-	backend, err := backends.New(cfg)
+	backend, err := backends.New(cfg, tokenStore{st})
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +63,29 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 
 		// 统一播放代理（source=openlist|jellyfin|cache）
 		api.GET("/stream", h.Stream)
+
+		// 设置 / 网盘授权
+		api.GET("/settings/providers", h.Providers)
+		api.POST("/auth/aliyun/qr", h.AliyunQR)
+		api.POST("/auth/aliyun/qr/status", h.AliyunQRStatus)
 	}
 
 	return r, nil
+}
+
+// tokenStore 把 *store.Store 适配成 backends.TokenStore（读写网盘 token）。
+type tokenStore struct{ st *store.Store }
+
+func (t tokenStore) GetToken(provider string) string {
+	cr, _, err := t.st.GetCredential(provider)
+	if err != nil {
+		return ""
+	}
+	return cr.Token
+}
+
+func (t tokenStore) SaveToken(provider, token string) error {
+	return t.st.SetCredentialToken(provider, token)
 }
 
 // sources 返回当前启用的来源列表。

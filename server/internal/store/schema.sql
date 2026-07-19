@@ -26,3 +26,11 @@ CREATE TABLE IF NOT EXISTS cache_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cache_status_access ON cache_items (status, last_access);
+
+-- 网盘凭据：阿里存 refresh_token，115/夸克存 cookie。扫码/填写后落库，轮换自动更新。
+CREATE TABLE IF NOT EXISTS credentials (
+    provider   TEXT PRIMARY KEY,          -- aliyun / 115 / quark
+    token      TEXT NOT NULL DEFAULT '',  -- refresh_token 或 cookie
+    extra      TEXT NOT NULL DEFAULT '',  -- 预留 JSON（如 open token、drive_id 等）
+    updated_at INTEGER NOT NULL
+);

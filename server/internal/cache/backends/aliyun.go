@@ -12,75 +12,53 @@ import (
 	"ivideo/server/internal/config"
 )
 
-// Aliyun 是阿里云盘缓存盘适配器，实现 Share2Open 转存缓存：
+// TokenStore 供适配器读写持久化的网盘凭据（扫码写入的 refresh_token，轮换后回写）。
+type TokenStore interface {
+	GetToken(provider string) string
+	SaveToken(provider, token string) error
+}
+
+// Aliyun 是阿里云盘缓存盘适配器（Share2Open 转存缓存，纯 web 单套）：
 //
-//	分享 → (web接口)转存到自己盘临时目录 → (开放接口)取直链播放 → 看完删除
+//	分享 → 转存到自己盘临时目录 → 取直链播放 → 删除
 //
-// 两套 token：
-//   - web refresh token（小雅 mytoken.txt）：做「取分享token」「转存」。
-//   - open refresh token（小雅 myopentoken.txt）：做「取直链」「删除」「查空间」。
+// token 来自「设置页扫码登录」写入数据库的 web refresh_token（轮换后自动回写库）。
+// 若库里没有则回退到配置 ALIYUN_REFRESH_TOKEN。
 //
-// ⚠️ 注意：
-//   - 阿里的 refresh token 每次刷新都会「轮换」。本适配器只在内存里保存轮换后的
-//     token，进程重启后仍用配置里的初始 token —— 若该 token 已被轮换失效会登录失败。
-//     生产使用建议接持久化，或用一个**专用小号**，避免和小雅共用同一 token 互相把对方挤下线。
-//   - 转存目前只支持「秒传」同步返回；非秒传（返回 async_task_id）首版未做轮询。
+// ⚠️ 已知限制：转存目前只支持秒传同步返回；非秒传（async_task_id）首版未做轮询。
 type Aliyun struct {
-	webRT        string
-	openRT       string
-	clientID     string
-	clientSecret string
-	openTokenURL string
+	webRT        string // 配置里的初始 refresh token（回退用）
 	tempFolderID string
 	driveID      string
+	tokens       TokenStore // 可为 nil
 
 	http *http.Client
 
-	mu      sync.Mutex
-	webTok  string
-	webExp  time.Time
-	openTok string
-	openExp time.Time
+	mu        sync.Mutex
+	accessTok string
+	accessExp time.Time
 }
 
-// NewAliyun 从配置创建阿里云盘适配器。
-func NewAliyun(cfg config.Config) *Aliyun {
+// NewAliyun 从配置创建阿里云盘适配器；tokens 用于读写扫码后的持久化 token。
+func NewAliyun(cfg config.Config, tokens TokenStore) *Aliyun {
 	return &Aliyun{
 		webRT:        cfg.AliyunRefreshToken,
-		openRT:       cfg.AliyunOpenRefreshToken,
-		clientID:     cfg.AliyunOpenClientID,
-		clientSecret: cfg.AliyunOpenClientSecret,
-		openTokenURL: cfg.AliyunOpenTokenURL,
 		tempFolderID: cfg.AliyunTempFolderID,
 		driveID:      cfg.AliyunDriveID,
+		tokens:       tokens,
 		http:         &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
 func (a *Aliyun) Name() string { return "aliyun" }
 
-// ready 校验必要配置。
-func (a *Aliyun) ready() error {
-	if a.webRT == "" {
-		return fmt.Errorf("阿里适配器缺少 ALIYUN_REFRESH_TOKEN（web refresh token）")
-	}
-	if a.openRT == "" || a.clientID == "" {
-		return fmt.Errorf("阿里适配器缺少开放接口配置（ALIYUN_OPEN_REFRESH_TOKEN / ALIYUN_OPEN_CLIENT_ID 等）")
-	}
-	return nil
-}
-
 // Transfer 把分享内文件转存到自己盘临时目录。
 func (a *Aliyun) Transfer(ctx context.Context, share cache.ShareRef) (cache.TransferResult, error) {
-	if err := a.ready(); err != nil {
-		return cache.TransferResult{}, err
-	}
 	shareID := parseAliShareID(share.ShareURL)
 	if shareID == "" {
 		return cache.TransferResult{}, fmt.Errorf("无法从分享链接解析 share_id: %s", share.ShareURL)
 	}
-
-	webTok, err := a.refreshWeb(ctx) // 同时确保 driveID 已就绪
+	accessTok, err := a.webToken(ctx) // 同时确保 driveID 就绪
 	if err != nil {
 		return cache.TransferResult{}, err
 	}
@@ -92,60 +70,52 @@ func (a *Aliyun) Transfer(ctx context.Context, share cache.ShareRef) (cache.Tran
 	if err != nil {
 		return cache.TransferResult{}, err
 	}
-	newID, err := a.copyFromShare(ctx, webTok, shareID, shareTok, fileID)
+	newID, err := a.copyFromShare(ctx, accessTok, shareID, shareTok, fileID)
 	if err != nil {
 		return cache.TransferResult{}, err
 	}
 	return cache.TransferResult{CachePath: newID, Size: size}, nil
 }
 
-// DirectURL 用开放接口取已转存文件的直链。cachePath 即自己盘的 file_id。
+// DirectURL 取已转存文件的直链。cachePath 即自己盘 file_id。
 func (a *Aliyun) DirectURL(ctx context.Context, cachePath string) (string, error) {
-	if err := a.ready(); err != nil {
-		return "", err
-	}
-	openTok, err := a.refreshOpen(ctx)
+	accessTok, err := a.webToken(ctx)
 	if err != nil {
 		return "", err
 	}
-	return a.openDownloadURL(ctx, openTok, cachePath)
+	return a.downloadURL(ctx, accessTok, cachePath)
 }
 
-// Delete 永久删除已转存文件。
+// Delete 删除已转存文件（进回收站）。
 func (a *Aliyun) Delete(ctx context.Context, cachePath string) error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	openTok, err := a.refreshOpen(ctx)
+	accessTok, err := a.webToken(ctx)
 	if err != nil {
 		return err
 	}
-	return a.openDelete(ctx, openTok, cachePath)
+	return a.deleteFile(ctx, accessTok, cachePath)
 }
 
-// EmptyTrash 采用永久删除，无需清回收站。
-func (a *Aliyun) EmptyTrash(ctx context.Context) error { return nil }
+// EmptyTrash 清空回收站，真正释放配额。
+func (a *Aliyun) EmptyTrash(ctx context.Context) error {
+	accessTok, err := a.webToken(ctx)
+	if err != nil {
+		return err
+	}
+	return a.clearTrash(ctx, accessTok)
+}
 
-// Quota 查询自己盘空间用量。
+// Quota 首版不查空间（清理按缓存项累计大小判断，不依赖此值）。
 func (a *Aliyun) Quota(ctx context.Context) (used, total int64, err error) {
-	if err = a.ready(); err != nil {
-		return 0, 0, err
-	}
-	openTok, err := a.refreshOpen(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	return a.openSpaceInfo(ctx, openTok)
+	return 0, 0, nil
 }
 
-// parseAliShareID 从分享链接里取 share_id，例如
+// parseAliShareID 从分享链接取 share_id，例如
 // https://www.alipan.com/s/wtT3hMC4vti → wtT3hMC4vti
 func parseAliShareID(shareURL string) string {
 	s := shareURL
 	if i := strings.Index(s, "/s/"); i >= 0 {
 		s = s[i+3:]
 	}
-	// 去掉后面的查询串或路径
 	for _, sep := range []string{"?", "/", "#"} {
 		if i := strings.Index(s, sep); i >= 0 {
 			s = s[:i]
