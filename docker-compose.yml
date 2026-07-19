@@ -12,6 +12,10 @@ services:
       - ./data/openlist:/opt/openlist/data
     environment:
       - TZ=Asia/Shanghai
+      - UMASK=022
+      # 如需以特定用户运行，取消注释并填入宿主机的 UID:GID
+      # - PUID=0
+      # - PGID=0
 
   # Go + Gin 后端：读取 OpenList 目录，代理视频流。
   server:
