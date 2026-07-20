@@ -42,6 +42,10 @@ type Config struct {
 	AliyunOpenClientSecret string // 开放平台应用 client_secret
 	AliyunOpenTokenURL     string // 官方开放接口换 token 地址(填了自己的 client 时用)
 	AliyunOpenRenewURL     string // 在线 token 服务(默认 OpenList 的 api.oplist.org)
+	// AliyunOpenConnectorURL 是本地 TV token 连接器(小雅的 aliyuntvtoken_connector)。
+	// oplist 的 TV 续期挂掉时作为回退。留空则不启用。
+	// ⚠️ 它会把 refresh token 转发给第三方 api.extscreen.com(明文 HTTP)。
+	AliyunOpenConnectorURL string
 	AliyunTempFolderID     string // 转存目标临时目录的 file_id（小雅的 temp_transfer_folder_id）
 	AliyunDriveID          string // 自己盘 drive_id，留空则从 web token 自动获取
 
@@ -82,6 +86,7 @@ func Load() Config {
 		AliyunOpenClientSecret: env("ALIYUN_OPEN_CLIENT_SECRET", ""),
 		AliyunOpenTokenURL:     env("ALIYUN_OPEN_TOKEN_URL", "https://openapi.alipan.com/oauth/access_token"),
 		AliyunOpenRenewURL:     env("ALIYUN_OPEN_RENEW_URL", "https://api.oplist.org/alicloud/renewapi"),
+		AliyunOpenConnectorURL: env("ALIYUN_OPEN_CONNECTOR_URL", ""),
 		AliyunTempFolderID:     env("ALIYUN_TEMP_FOLDER_ID", "root"),
 		AliyunDriveID:          env("ALIYUN_DRIVE_ID", ""),
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -222,6 +223,21 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		raw, _ := io.ReadAll(resp.Body)
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return "", fmt.Errorf("在线 token 服务响应解析失败: %w (%s)", err, truncateBody(raw))
+		}
+	}
+
+	// 在线服务没给到 token 时，回退到本地 TV 连接器(小雅的 aliyuntvtoken_connector)。
+	if out.AccessToken == "" && a.openConnectorURL != "" {
+		var alt struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			ExpiresIn    int    `json:"expires_in"`
+		}
+		if err := a.doJSON(ctx, a.openConnectorURL, nil, map[string]string{"refresh_token": rt}, &alt); err != nil {
+			log.Printf("[aliyun] TV 连接器回退失败: %v", err)
+		} else if alt.AccessToken != "" {
+			log.Printf("[aliyun] 已通过本地 TV 连接器取得开放接口 token")
+			out.AccessToken, out.RefreshToken, out.ExpiresIn = alt.AccessToken, alt.RefreshToken, alt.ExpiresIn
 		}
 	}
 

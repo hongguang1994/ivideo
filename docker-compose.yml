@@ -63,6 +63,8 @@ services:
       - CACHE_CLEAN_INTERVAL_MINUTES=${CACHE_CLEAN_INTERVAL_MINUTES:-10}
       - ALIYUN_REFRESH_TOKEN=${ALIYUN_REFRESH_TOKEN:-}
       - ALIYUN_TEMP_FOLDER_ID=${ALIYUN_TEMP_FOLDER_ID:-root}
+      # 本地 TV token 连接器(oplist 续期挂掉时回退);留空则不启用
+      - ALIYUN_OPEN_CONNECTOR_URL=${ALIYUN_OPEN_CONNECTOR_URL:-}
       # strm 媒体库(与 jellyfin 共享同一目录)
       - MEDIA_DIR=/media
       - SITE_URL=${SITE_URL:-http://localhost:8090}

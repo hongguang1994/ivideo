@@ -42,6 +42,7 @@ type Aliyun struct {
 	openClientSecret string
 	openTokenURL     string
 	openRenewURL     string
+	openConnectorURL string
 
 	http *http.Client
 
@@ -64,6 +65,7 @@ func NewAliyun(cfg config.Config, tokens TokenStore) *Aliyun {
 		openClientSecret: cfg.AliyunOpenClientSecret,
 		openTokenURL:     cfg.AliyunOpenTokenURL,
 		openRenewURL:     cfg.AliyunOpenRenewURL,
+		openConnectorURL: cfg.AliyunOpenConnectorURL,
 		http:             &http.Client{Timeout: 30 * time.Second},
 	}
 }
