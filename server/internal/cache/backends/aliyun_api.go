@@ -26,6 +26,9 @@ const (
 	aliOpenDownloadURL = "https://openapi.alipan.com/adrive/v1.0/openFile/getDownloadUrl"
 )
 
+// browserUA 用于绕过 Cloudflare 对非浏览器客户端的拦截(见 openAccessToken)。
+const browserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
 // doJSON 发一个 JSON 请求并把响应解到 out；非 2xx 返回带响应体的错误。
 func (a *Aliyun) doJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
 	var rd io.Reader
@@ -206,6 +209,11 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		// api.oplist.org 在 Cloudflare 后面，默认的 Go-http-client UA 会被
+		// 浏览器完整性检查拦掉(HTTP 403 / error code: 1010)，故伪装成常规浏览器。
+		req.Header.Set("User-Agent", browserUA)
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 		resp, err := a.http.Do(req)
 		if err != nil {
 			return "", fmt.Errorf("在线 token 服务请求失败: %w", err)
