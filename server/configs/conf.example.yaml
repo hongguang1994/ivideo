@@ -60,3 +60,7 @@ hls:
     - "alipan.com"
     - "aliyuncs.com"
     - "alicdn.com"
+
+log:
+  level: "info"    # debug / info / warn / error
+  format: "text"   # text / json

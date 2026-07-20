@@ -5,10 +5,14 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ivideo/server/internal/handlers"
+	"ivideo/server/internal/middleware"
 )
 
-// Register 注册所有路由。业务接口统一挂在 handlers.APIPrefix(/api/v1)下。
+// Register 装配中间件并注册所有路由。业务接口统一挂在 handlers.APIPrefix(/api/v1)下。
 func Register(r *gin.Engine, h *handlers.Handler) {
+	// 全局中间件栈：Recovery 兜底 panic（返回 500 不崩），Logger 记录访问日志。
+	r.Use(gin.Recovery(), middleware.Logger())
+
 	api := r.Group(handlers.APIPrefix)
 
 	api.GET("/health", h.Health)

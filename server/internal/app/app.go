@@ -2,7 +2,7 @@
 package app
 
 import (
-	"log"
+	"log/slog"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,9 +24,9 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	var jf *jellyfin.Client
 	if cfg.JellyfinEnabled() {
 		jf = jellyfin.New(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey)
-		log.Printf("已启用 Jellyfin 源：%s", cfg.JellyfinBaseURL)
+		slog.Info("已启用 Jellyfin 源", "baseURL", cfg.JellyfinBaseURL)
 	} else {
-		log.Printf("未配置 Jellyfin，仅提供 OpenList 源")
+		slog.Info("未配置 Jellyfin，仅提供 OpenList 源")
 	}
 
 	// 缓存盘适配器 + 管理器 + 清理任务。
@@ -36,11 +36,12 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	}
 	cm := cache.NewManager(st, backend, cfg.CacheDir)
 	cm.StartCleanup(cfg.CacheCleanInterval, cfg.CacheTTLHours, cfg.CacheMaxBytes)
-	log.Printf("缓存盘适配器：%s", backend.Name())
+	slog.Info("缓存盘适配器已就绪", "backend", backend.Name())
 
 	h := handlers.New(cfg, ol, jf, st, cm)
 
-	r := gin.Default()
+	// 用 gin.New()（而非 gin.Default()），中间件栈由 router 显式装配，避免重复。
+	r := gin.New()
 	router.Register(r, h)
 	return r, nil
 }

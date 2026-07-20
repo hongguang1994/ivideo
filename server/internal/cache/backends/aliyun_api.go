@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -231,9 +231,9 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 			ExpiresIn    int    `json:"expires_in"`
 		}
 		if err := a.doJSON(ctx, a.openConnectorURL, nil, map[string]string{"refresh_token": rt}, &alt); err != nil {
-			log.Printf("[aliyun] TV 连接器回退失败: %v", err)
+			slog.Warn("阿里 TV 连接器回退失败", "err", err)
 		} else if alt.AccessToken != "" {
-			log.Printf("[aliyun] 已通过本地 TV 连接器取得开放接口 token")
+			slog.Info("已通过本地 TV 连接器取得开放接口 token")
 			out.AccessToken, out.RefreshToken, out.ExpiresIn = alt.AccessToken, alt.RefreshToken, alt.ExpiresIn
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -157,10 +157,10 @@ func extractRefreshToken(bizExt string) (string, error) {
 func logBizExtShape(decoded []byte) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(decoded, &top); err != nil {
-		log.Printf("[aliauth] bizExt 顶层非对象或解析失败,总长=%d", len(decoded))
+		slog.Debug("bizExt 顶层非对象或解析失败", "len", len(decoded))
 		return
 	}
-	log.Printf("[aliauth] bizExt 顶层字段: %s", describeKeys(top))
+	slog.Debug("bizExt 顶层字段", "keys", describeKeys(top))
 	inner := top["pds_login_result"]
 	if len(inner) > 0 && inner[0] == '"' {
 		var s string
@@ -170,7 +170,7 @@ func logBizExtShape(decoded []byte) {
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(inner, &fields) == nil {
-		log.Printf("[aliauth] pds_login_result 字段: %s", describeKeys(fields))
+		slog.Debug("pds_login_result 字段", "keys", describeKeys(fields))
 	}
 }
 

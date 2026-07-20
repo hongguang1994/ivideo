@@ -9,7 +9,7 @@ package strm
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,7 +76,7 @@ func (g *Generator) Generate() (Result, error) {
 	}
 
 	res.Removed = g.cleanOrphans(want)
-	log.Printf("strm 生成完成: 资源=%d 写入=%d 清理=%d", res.Total, res.Written, res.Removed)
+	slog.Info("strm 生成完成", "total", res.Total, "written", res.Written, "removed", res.Removed)
 	return res, nil
 }
 

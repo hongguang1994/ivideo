@@ -3,7 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	"ivideo/server/internal/store"
@@ -147,11 +147,11 @@ func (m *Manager) startTransfer(res store.Resource) {
 		// 转存阶段只做 copy；copy 成功即就绪（直链在播放时实时取）。
 		tr, err := m.backend.Transfer(ctx, share)
 		if err != nil {
-			log.Printf("转存失败 resource=%d: %v", res.ID, err)
+			slog.Error("转存失败", "resource", res.ID, "err", err)
 			_ = m.store.SetFailed(res.ID, m.backend.Name(), err.Error())
 			return
 		}
 		_ = m.store.SetReady(res.ID, m.backend.Name(), tr.CachePath, "", tr.Size)
-		log.Printf("转存就绪 resource=%d path=%s size=%d", res.ID, tr.CachePath, tr.Size)
+		slog.Info("转存就绪", "resource", res.ID, "path", tr.CachePath, "size", tr.Size)
 	}()
 }

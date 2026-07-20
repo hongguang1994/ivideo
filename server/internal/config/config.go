@@ -61,6 +61,10 @@ type Config struct {
 	// HLSAllowedHosts 是 HLS 代理允许转发的上游主机白名单（防开放代理）。
 	HLSAllowedHosts []string
 
+	// 日志
+	LogLevel  string // debug / info / warn / error
+	LogFormat string // text / json
+
 	// VideoExts 认定为视频的扩展名（小写，含点），用于过滤目录项。
 	VideoExts []string
 }
@@ -142,6 +146,9 @@ func setDefaults(v *viper.Viper) {
 		"aliyundrive.com", "aliyundrive.net", "aliyundrive.cloud",
 		"alipan.com", "aliyuncs.com", "alicdn.com",
 	})
+
+	v.SetDefault("log.level", "info")
+	v.SetDefault("log.format", "text")
 }
 
 // Load 按「默认值 → 配置文件 → 环境变量」加载配置。cfgFile 为空则自动查找 ./conf/conf.json。
@@ -186,6 +193,9 @@ func Load(cfgFile string) (Config, error) {
 		AliyunBrowserUA:        v.GetString("aliyun.browser_ua"),
 
 		HLSAllowedHosts: v.GetStringSlice("hls.allowed_hosts"),
+
+		LogLevel:  v.GetString("log.level"),
+		LogFormat: v.GetString("log.format"),
 
 		VideoExts: []string{".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".m4v", ".ts"},
 	}, nil

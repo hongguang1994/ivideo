@@ -2,7 +2,7 @@ package cache
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"ivideo/server/internal/store"
@@ -21,14 +21,14 @@ func (m *Manager) StartCleanup(intervalMinutes, ttlHours int, maxBytes int64) {
 			m.cleanupOnce(ttlHours, maxBytes)
 		}
 	}()
-	log.Printf("清理任务已启动：每 %d 分钟，TTL=%dh，上限=%d 字节", intervalMinutes, ttlHours, maxBytes)
+	slog.Info("清理任务已启动", "intervalMinutes", intervalMinutes, "ttlHours", ttlHours, "maxBytes", maxBytes)
 }
 
 // cleanupOnce 执行一轮清理。
 func (m *Manager) cleanupOnce(ttlHours int, maxBytes int64) {
 	items, err := m.store.ListReady() // 已按 last_access 升序（最久未看在前）
 	if err != nil {
-		log.Printf("清理：读取缓存项失败: %v", err)
+		slog.Error("清理：读取缓存项失败", "err", err)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (m *Manager) cleanupOnce(ttlHours int, maxBytes int64) {
 	// 3) 真正释放配额需清空回收站。
 	if deleted {
 		if err := m.backend.EmptyTrash(context.Background()); err != nil {
-			log.Printf("清理：清空回收站失败: %v", err)
+			slog.Error("清理：清空回收站失败", "err", err)
 		}
 	}
 }
@@ -86,11 +86,11 @@ func (m *Manager) evict(it store.CacheItem) bool {
 
 	if it.CachePath != "" {
 		if err := m.backend.Delete(context.Background(), it.CachePath); err != nil {
-			log.Printf("清理：删除失败 resource=%d path=%s: %v", it.ResourceID, it.CachePath, err)
+			slog.Error("清理：删除失败", "resource", it.ResourceID, "path", it.CachePath, "err", err)
 			return false
 		}
 	}
 	_ = m.store.MarkCleaned(it.ResourceID)
-	log.Printf("清理：已释放 resource=%d path=%s", it.ResourceID, it.CachePath)
+	slog.Info("清理：已释放", "resource", it.ResourceID, "path", it.CachePath)
 	return true
 }
