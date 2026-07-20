@@ -76,6 +76,8 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 		// Emby/Jellyfin(strm) 伪文件入口 → 302 原画直链;HEAD 不触发转存
 		api.GET("/file/:name", h.FileGateway)
 		api.HEAD("/file/:name", h.FileGateway)
+		// 生成 strm 媒体库
+		api.POST("/strm/generate", h.GenerateStrm)
 	}
 
 	return r, nil

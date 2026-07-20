@@ -78,6 +78,22 @@ export async function playResource(id: number): Promise<PlayResp> {
   return res.json();
 }
 
+export interface StrmResult {
+  total: number;
+  written: number;
+  removed: number;
+  errors?: string[];
+  mediaDir: string;
+  siteUrl: string;
+}
+
+// 全量重建 strm 媒体库(给 Emby/Jellyfin 扫描)。
+export async function generateStrm(): Promise<StrmResult> {
+  const res = await fetch("/api/strm/generate", { method: "POST" });
+  if (!res.ok) throw new Error((await res.json()).error || `生成失败: ${res.status}`);
+  return res.json();
+}
+
 // ---- 网盘授权 / 设置 ----
 
 export interface Provider {

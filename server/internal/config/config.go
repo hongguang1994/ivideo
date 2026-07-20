@@ -18,6 +18,10 @@ type Config struct {
 	JellyfinBaseURL string // Jellyfin 服务地址，例如 http://jellyfin:8096
 	JellyfinAPIKey  string // Jellyfin 后台生成的 API Key
 
+	// ---- strm 媒体库(给 Emby/Jellyfin 扫描)----
+	MediaDir string // strm 落地目录(容器内路径)
+	SiteURL  string // strm 里写的站点地址，如 http://192.168.50.140:8090
+
 	// ---- 按需转存缓存 ----
 	DBPath             string // SQLite 文件路径
 	CacheBackend       string // 缓存盘适配器：fake / aliyun / ...
@@ -55,6 +59,9 @@ func Load() Config {
 		OpenListRoot:     env("OPENLIST_ROOT", "/"),
 		JellyfinBaseURL:  strings.TrimRight(env("JELLYFIN_BASE_URL", ""), "/"),
 		JellyfinAPIKey:   env("JELLYFIN_API_KEY", ""),
+
+		MediaDir: env("MEDIA_DIR", "/media"),
+		SiteURL:  strings.TrimRight(env("SITE_URL", "http://localhost:8090"), "/"),
 
 		DBPath:             env("DB_PATH", "./ivideo.db"),
 		CacheBackend:       env("CACHE_BACKEND", "fake"),

@@ -63,9 +63,13 @@ services:
       - CACHE_CLEAN_INTERVAL_MINUTES=${CACHE_CLEAN_INTERVAL_MINUTES:-10}
       - ALIYUN_REFRESH_TOKEN=${ALIYUN_REFRESH_TOKEN:-}
       - ALIYUN_TEMP_FOLDER_ID=${ALIYUN_TEMP_FOLDER_ID:-root}
+      # strm 媒体库(与 jellyfin 共享同一目录)
+      - MEDIA_DIR=/media
+      - SITE_URL=${SITE_URL:-http://localhost:8090}
       - GIN_MODE=release
     volumes:
       - ./data/server:/data
+      - ./data/media:/media
     depends_on:
       - openlist
       - jellyfin

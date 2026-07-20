@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { addResource, getResources, type Resource } from "../api";
+import { addResource, generateStrm, getResources, type Resource } from "../api";
 
 export default function Resources() {
   const [items, setItems] = useState<Resource[]>([]);
   const [error, setError] = useState("");
+  const [strmMsg, setStrmMsg] = useState("");
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({
     title: "",
@@ -20,6 +21,20 @@ export default function Resources() {
       .catch((e) => setError(String(e.message || e)));
   };
   useEffect(load, []);
+
+  const doGenerateStrm = async () => {
+    setError("");
+    setStrmMsg("生成中…");
+    try {
+      const r = await generateStrm();
+      setStrmMsg(
+        `✅ 已生成 ${r.written}/${r.total} 个 strm,清理 ${r.removed} 个 · 目录 ${r.mediaDir} · 指向 ${r.siteUrl}`
+      );
+    } catch (e) {
+      setStrmMsg("");
+      setError(String((e as Error).message || e));
+    }
+  };
 
   const submit = async () => {
     setError("");
@@ -37,11 +52,15 @@ export default function Resources() {
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2 style={{ marginRight: "auto" }}>资源库 · 按需转存</h2>
+        <button className="tab" onClick={doGenerateStrm}>
+          生成 strm
+        </button>
         <button className="tab" onClick={() => setShow((s) => !s)}>
           {show ? "取消" : "+ 添加资源"}
         </button>
       </div>
       {error && <p style={{ color: "#f87171" }}>出错了: {error}</p>}
+      {strmMsg && <p className="muted" style={{ fontSize: 13 }}>{strmMsg}</p>}
 
       {show && (
         <div className="add-form">
