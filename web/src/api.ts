@@ -35,6 +35,49 @@ export async function getHealth(): Promise<Health> {
   return res.json();
 }
 
+// ---- 资源库 / 按需转存 ----
+
+export interface Resource {
+  id: number;
+  title: string;
+  poster?: string;
+  overview?: string;
+  provider: string;
+  shareUrl: string;
+  sharePwd?: string;
+  filePath?: string;
+}
+
+export async function getResources(): Promise<Resource[]> {
+  const res = await fetch("/api/resources");
+  if (!res.ok) throw new Error(`加载失败: ${res.status}`);
+  return (await res.json()).items || [];
+}
+
+export async function addResource(r: Partial<Resource>): Promise<Resource> {
+  const res = await fetch("/api/resources", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(r),
+  });
+  if (!res.ok) throw new Error((await res.json()).error || `添加失败: ${res.status}`);
+  return res.json();
+}
+
+export interface PlayResp {
+  status: "uncached" | "transferring" | "ready" | "failed" | "cleaned";
+  streamUrl?: string;
+  type?: "hls" | "direct";
+  message?: string;
+}
+
+// 触发/查询转存;就绪返回 streamUrl。
+export async function playResource(id: number): Promise<PlayResp> {
+  const res = await fetch(`/api/play?resource=${id}`);
+  if (!res.ok) throw new Error(`播放请求失败: ${res.status}`);
+  return res.json();
+}
+
 // ---- 网盘授权 / 设置 ----
 
 export interface Provider {

@@ -170,6 +170,27 @@ a {
   font-size: 15px;
   font-weight: 600;
 }
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.add-form input,
+.add-form select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  flex: 1 1 200px;
+}
+
 .qr-box {
   margin-top: 24px;
   padding: 20px;

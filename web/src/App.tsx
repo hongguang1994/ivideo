@@ -2,6 +2,7 @@ import { Link, Route, Routes } from "react-router-dom";
 import Home from "./pages/Home";
 import Watch from "./pages/Watch";
 import Settings from "./pages/Settings";
+import Resources from "./pages/Resources";
 
 export default function App() {
   return (
@@ -11,7 +12,10 @@ export default function App() {
           ▶ ivideo
         </Link>
         <span className="muted">网盘视频平台</span>
-        <Link to="/settings" className="header-link">
+        <Link to="/resources" className="header-link" style={{ marginLeft: "auto" }}>
+          资源库
+        </Link>
+        <Link to="/settings" className="header-link" style={{ marginLeft: 16 }}>
           设置
         </Link>
       </header>
@@ -19,6 +23,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/watch" element={<Watch />} />
+          <Route path="/resources" element={<Resources />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

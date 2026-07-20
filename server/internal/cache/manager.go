@@ -41,7 +41,8 @@ func (m *Manager) EnsureReady(resourceID int64) (store.CacheItem, error) {
 	if err != nil {
 		return store.CacheItem{}, err
 	}
-	if item.Status == store.StatusReady && item.DirectURL != "" {
+	// 就绪 = 已转存(cache_path 已写)。直链在播放时实时取（HLS 地址会过期，不入库）。
+	if item.Status == store.StatusReady && item.CachePath != "" {
 		_ = m.store.TouchAccess(resourceID)
 		return item, nil
 	}
@@ -53,16 +54,16 @@ func (m *Manager) EnsureReady(resourceID int64) (store.CacheItem, error) {
 	return item, nil
 }
 
-// StreamURL 返回可代理播放的直链；未就绪则返回错误（交由上层提示“转存中”）。
+// StreamURL 确保已转存后，实时取一个可播直链（HLS 地址短时有效，每次现取）。
 func (m *Manager) StreamURL(resourceID int64) (string, error) {
 	item, err := m.EnsureReady(resourceID)
 	if err != nil {
 		return "", err
 	}
-	if item.Status != store.StatusReady || item.DirectURL == "" {
+	if item.Status != store.StatusReady || item.CachePath == "" {
 		return "", fmt.Errorf("资源尚未就绪（%s）", item.Status)
 	}
-	return item.DirectURL, nil
+	return m.backend.DirectURL(context.Background(), item.CachePath)
 }
 
 // startTransfer 非阻塞触发一次转存，同一资源并发只跑一个。
@@ -92,19 +93,14 @@ func (m *Manager) startTransfer(res store.Resource) {
 			FilePath: res.FilePath,
 		}
 
+		// 转存阶段只做 copy；copy 成功即就绪（直链在播放时实时取）。
 		tr, err := m.backend.Transfer(ctx, share)
 		if err != nil {
 			log.Printf("转存失败 resource=%d: %v", res.ID, err)
 			_ = m.store.SetFailed(res.ID, m.backend.Name(), err.Error())
 			return
 		}
-		url, err := m.backend.DirectURL(ctx, tr.CachePath)
-		if err != nil {
-			log.Printf("取直链失败 resource=%d: %v", res.ID, err)
-			_ = m.store.SetFailed(res.ID, m.backend.Name(), err.Error())
-			return
-		}
-		_ = m.store.SetReady(res.ID, m.backend.Name(), tr.CachePath, url, tr.Size)
+		_ = m.store.SetReady(res.ID, m.backend.Name(), tr.CachePath, "", tr.Size)
 		log.Printf("转存就绪 resource=%d path=%s size=%d", res.ID, tr.CachePath, tr.Size)
 	}()
 }

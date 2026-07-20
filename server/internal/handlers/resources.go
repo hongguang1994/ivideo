@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -55,7 +56,20 @@ func (h *Handler) Play(c *gin.Context) {
 	resp := gin.H{"status": item.Status}
 	switch item.Status {
 	case store.StatusReady:
-		resp["streamUrl"] = "/api/stream?source=cache&resource=" + itoa(id)
+		// 实时取播放地址(HLS 短时有效)。
+		url, err := h.cache.StreamURL(id)
+		if err != nil {
+			// 取地址失败时按“转存中”让前端继续轮询。
+			resp["status"] = store.StatusTransferring
+			resp["message"] = "正在准备播放地址…"
+			break
+		}
+		resp["streamUrl"] = url
+		if strings.Contains(strings.ToLower(url), ".m3u8") {
+			resp["type"] = "hls"
+		} else {
+			resp["type"] = "direct"
+		}
 	case store.StatusTransferring, store.StatusUncached:
 		resp["message"] = "正在转存到网盘，请稍候…"
 	case store.StatusFailed:

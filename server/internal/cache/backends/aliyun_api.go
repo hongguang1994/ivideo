@@ -16,9 +16,9 @@ const (
 	aliWebTokenURL   = "https://auth.alipan.com/v2/account/token"             // web refresh → access token
 	aliShareTokenURL = "https://api.alipan.com/v2/share_link/get_share_token" // 分享 token
 	aliShareListURL  = "https://api.alipan.com/adrive/v3/file/list"           // 列分享内文件
-	aliCopyURL       = "https://api.alipan.com/adrive/v2/file/copy"           // 转存(分享→自己盘)
-	aliDownloadURL   = "https://api.alipan.com/v2/file/get_download_url"      // 取直链
-	aliDeleteURL     = "https://api.alipan.com/v3/file/delete"               // 删除(进回收站)
+	aliCopyURL         = "https://api.alipan.com/adrive/v2/file/copy"                  // 转存(分享→自己盘)
+	aliVideoPreviewURL = "https://api.alipan.com/v2/file/get_video_preview_play_info" // 转码 HLS 播放地址
+	aliDeleteURL       = "https://api.alipan.com/v3/file/delete"                       // 删除(进回收站)
 	aliClearTrashURL = "https://api.alipan.com/v2/recyclebin/clear"          // 清空回收站
 )
 
@@ -81,11 +81,9 @@ func (a *Aliyun) webToken(ctx context.Context) (string, error) {
 	}
 
 	var out struct {
-		AccessToken     string `json:"access_token"`
-		RefreshToken    string `json:"refresh_token"`
-		ExpiresIn       int    `json:"expires_in"`
-		DefaultDriveID  string `json:"default_drive_id"`
-		ResourceDriveID string `json:"resource_drive_id"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
 	}
 	body := map[string]string{"grant_type": "refresh_token", "refresh_token": rt}
 	if err := a.doJSON(ctx, aliWebTokenURL, nil, body, &out); err != nil {
@@ -98,14 +96,6 @@ func (a *Aliyun) webToken(ctx context.Context) (string, error) {
 	a.mu.Lock()
 	a.accessTok = out.AccessToken
 	a.accessExp = time.Now().Add(time.Duration(max(out.ExpiresIn-60, 60)) * time.Second)
-	if a.driveID == "" {
-		// 用备份盘(default);ivideo 临时目录也建在备份盘,须一致。
-		if out.DefaultDriveID != "" {
-			a.driveID = out.DefaultDriveID
-		} else {
-			a.driveID = out.ResourceDriveID
-		}
-	}
 	a.mu.Unlock()
 
 	// refresh token 会轮换，回写库/内存。
@@ -115,7 +105,46 @@ func (a *Aliyun) webToken(ctx context.Context) (string, error) {
 			_ = a.tokens.SaveToken("aliyun", out.RefreshToken)
 		}
 	}
+
+	// 确保 drive_id 就绪(优先资源盘)。
+	if err := a.ensureDrive(ctx, out.AccessToken); err != nil {
+		return "", err
+	}
 	return out.AccessToken, nil
+}
+
+// ensureDrive 若 driveID 未定,用 user/get 取资源盘(备份盘兜底)。
+func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
+	a.mu.Lock()
+	if a.driveID != "" {
+		a.mu.Unlock()
+		return nil
+	}
+	a.mu.Unlock()
+
+	var out struct {
+		ResourceDriveID string `json:"resource_drive_id"`
+		BackupDriveID   string `json:"backup_drive_id"`
+		DefaultDriveID  string `json:"default_drive_id"`
+	}
+	headers := map[string]string{"Authorization": "Bearer " + accessTok}
+	if err := a.doJSON(ctx, "https://user.alipan.com/v2/user/get", headers, map[string]any{}, &out); err != nil {
+		return fmt.Errorf("获取网盘信息失败: %w", err)
+	}
+	d := out.ResourceDriveID // 优先资源盘（转存/HLS 更稳）
+	if d == "" {
+		d = out.BackupDriveID
+	}
+	if d == "" {
+		d = out.DefaultDriveID
+	}
+	if d == "" {
+		return fmt.Errorf("未获取到 drive_id")
+	}
+	a.mu.Lock()
+	a.driveID = d
+	a.mu.Unlock()
+	return nil
 }
 
 // shareToken 取某分享的访问 token。
@@ -232,20 +261,44 @@ func (a *Aliyun) copyFromShare(ctx context.Context, accessTok, shareID, shareTok
 	return "", fmt.Errorf("转存返回异步任务(async_task_id=%s)，该文件非秒传，首版暂未支持轮询", out.AsyncTaskID)
 }
 
-// downloadURL 取自己盘文件的可播直链。
-func (a *Aliyun) downloadURL(ctx context.Context, accessTok, fileID string) (string, error) {
+// playURL 取自己盘视频文件的转码 HLS 播放地址(m3u8)。
+// 阿里对视频不放原画直链(get_download_url 返回空),转码 HLS 才可用。
+func (a *Aliyun) playURL(ctx context.Context, accessTok, fileID string) (string, error) {
 	headers := map[string]string{"Authorization": "Bearer " + accessTok}
-	body := map[string]any{"drive_id": a.driveID, "file_id": fileID}
-	var out struct {
-		URL string `json:"url"`
+	body := map[string]any{
+		"drive_id":       a.driveID,
+		"file_id":        fileID,
+		"category":       "live_transcoding",
+		"url_expire_sec": 14400,
 	}
-	if err := a.doJSON(ctx, aliDownloadURL, headers, body, &out); err != nil {
+	var out struct {
+		VideoPreviewPlayInfo struct {
+			LiveTranscodingTaskList []struct {
+				TemplateID string `json:"template_id"`
+				Status     string `json:"status"`
+				URL        string `json:"url"`
+			} `json:"live_transcoding_task_list"`
+		} `json:"video_preview_play_info"`
+	}
+	if err := a.doJSON(ctx, aliVideoPreviewURL, headers, body, &out); err != nil {
 		return "", err
 	}
-	if out.URL == "" {
-		return "", fmt.Errorf("未取到下载直链")
+	// 优先高清(HD > SD),取已完成且有 url 的清晰度。
+	tasks := out.VideoPreviewPlayInfo.LiveTranscodingTaskList
+	best := ""
+	for _, t := range tasks {
+		if t.Status != "finished" || t.URL == "" {
+			continue
+		}
+		if t.TemplateID == "HD" {
+			return t.URL, nil
+		}
+		best = t.URL
 	}
-	return out.URL, nil
+	if best == "" {
+		return "", fmt.Errorf("未取到可播的转码地址(转码可能未就绪)")
+	}
+	return best, nil
 }
 
 // deleteFile 删除自己盘文件（进回收站）。

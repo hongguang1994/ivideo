@@ -83,7 +83,7 @@ func (a *Aliyun) DirectURL(ctx context.Context, cachePath string) (string, error
 	if err != nil {
 		return "", err
 	}
-	return a.downloadURL(ctx, accessTok, cachePath)
+	return a.playURL(ctx, accessTok, cachePath)
 }
 
 // Delete 删除已转存文件（进回收站）。
