@@ -14,6 +14,7 @@ export default function Watch() {
   // ---- 资源库模式:轮询转存状态 ----
   const [status, setStatus] = useState("");
   const [streamUrl, setStreamUrl] = useState("");
+  const [isHls, setIsHls] = useState(false);
   const [msg, setMsg] = useState("");
   const pollRef = useRef<number | null>(null);
 
@@ -26,6 +27,7 @@ export default function Watch() {
         setMsg(r.message || "");
         if (r.status === "ready" && r.streamUrl) {
           setStreamUrl(r.streamUrl);
+          setIsHls(r.type === "hls");
           if (pollRef.current) clearInterval(pollRef.current);
         }
       } catch (e) {
@@ -46,7 +48,7 @@ export default function Watch() {
           <Link to="/resources" style={{ color: "var(--accent)" }}>⬅ 返回资源库</Link>
         </div>
         {streamUrl ? (
-          <Player src={streamUrl} name={name} />
+          <Player src={streamUrl} name={name} hls={isHls} />
         ) : (
           <div className="qr-box" style={{ background: "var(--surface)", color: "var(--text)" }}>
             <p>{status === "failed" ? "❌ " : "⏳ "}{msg || "正在转存到你的网盘…"}</p>

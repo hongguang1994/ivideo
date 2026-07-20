@@ -56,7 +56,7 @@ func (h *Handler) Play(c *gin.Context) {
 	resp := gin.H{"status": item.Status}
 	switch item.Status {
 	case store.StatusReady:
-		// 实时取播放地址(HLS 短时有效)。
+		// 实时取播放地址(HLS 短时有效),判断类型后走对应的同源代理。
 		url, err := h.cache.StreamURL(id)
 		if err != nil {
 			// 取地址失败时按“转存中”让前端继续轮询。
@@ -64,11 +64,12 @@ func (h *Handler) Play(c *gin.Context) {
 			resp["message"] = "正在准备播放地址…"
 			break
 		}
-		resp["streamUrl"] = url
 		if strings.Contains(strings.ToLower(url), ".m3u8") {
 			resp["type"] = "hls"
+			resp["streamUrl"] = "/api/hls?resource=" + itoa(id) // 代理并改写切片,规避跨域
 		} else {
 			resp["type"] = "direct"
+			resp["streamUrl"] = "/api/stream?source=cache&resource=" + itoa(id)
 		}
 	case store.StatusTransferring, store.StatusUncached:
 		resp["message"] = "正在转存到网盘，请稍候…"

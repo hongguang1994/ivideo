@@ -63,6 +63,9 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 
 		// 统一播放代理（source=openlist|jellyfin|cache）
 		api.GET("/stream", h.Stream)
+		// HLS 同源代理（转码 m3u8 + 切片）
+		api.GET("/hls", h.HLSPlaylist)
+		api.GET("/hls-seg", h.HLSSegment)
 
 		// 设置 / 网盘授权
 		api.GET("/settings/providers", h.Providers)
