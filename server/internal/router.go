@@ -59,6 +59,8 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 		// 资源目录 + 按需转存缓存
 		api.GET("/resources", h.ListResources)
 		api.POST("/resources", h.AddResource)
+		api.POST("/resources/import", h.ImportShare)
+		api.GET("/share/browse", h.BrowseShare)
 		api.GET("/play", h.Play)
 
 		// 统一播放代理（source=openlist|jellyfin|cache）

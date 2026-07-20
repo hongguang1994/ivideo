@@ -41,6 +41,19 @@ type CacheBackend interface {
 	Quota(ctx context.Context) (used, total int64, err error)
 }
 
+// ShareEntry 是分享内的一个条目。
+type ShareEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"` // 分享内相对路径，可直接用作资源的 FilePath
+	IsDir bool   `json:"isDir"`
+	Size  int64  `json:"size"`
+}
+
+// ShareLister 是可选能力：能列出分享内的目录，用于批量导入。
+type ShareLister interface {
+	ListShare(ctx context.Context, share ShareRef, subPath string) ([]ShareEntry, error)
+}
+
 // HLSStreamer 表示该适配器的 DirectURL 返回的是 HLS 播放列表(m3u8)。
 // 不能靠 URL 里有没有 ".m3u8" 判断 —— 阿里 FHD/HD 档的地址路径里并不带该后缀。
 type HLSStreamer interface {

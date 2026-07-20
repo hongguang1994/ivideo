@@ -82,6 +82,15 @@ func (m *Manager) OriginalURL(resourceID int64) (string, error) {
 	return m.backend.DirectURL(context.Background(), item.CachePath)
 }
 
+// ListShare 列出分享内目录(适配器需实现 ShareLister)。
+func (m *Manager) ListShare(share ShareRef, subPath string) ([]ShareEntry, error) {
+	p, ok := m.backend.(ShareLister)
+	if !ok {
+		return nil, fmt.Errorf("当前缓存盘适配器(%s)不支持浏览分享", m.backend.Name())
+	}
+	return p.ListShare(context.Background(), share, subPath)
+}
+
 // IsHLS 表示当前适配器的播放地址是否为 HLS。
 func (m *Manager) IsHLS() bool {
 	if p, ok := m.backend.(HLSStreamer); ok {

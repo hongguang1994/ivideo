@@ -106,6 +106,41 @@ func (a *Aliyun) DirectURL(ctx context.Context, cachePath string) (string, error
 	return a.playURL(ctx, accessTok, cachePath)
 }
 
+// ListShare 列出分享内某目录(subPath 为空则列根)。
+func (a *Aliyun) ListShare(ctx context.Context, share cache.ShareRef, subPath string) ([]cache.ShareEntry, error) {
+	shareID := parseAliShareID(share.ShareURL)
+	if shareID == "" {
+		return nil, fmt.Errorf("无法解析 share_id: %s", share.ShareURL)
+	}
+	shareTok, err := a.shareToken(ctx, shareID, share.SharePwd)
+	if err != nil {
+		return nil, err
+	}
+	parent := "root"
+	if subPath != "" && subPath != "/" {
+		id, _, err := a.resolveFileID(ctx, shareID, shareTok, subPath)
+		if err != nil {
+			return nil, err
+		}
+		parent = id
+	}
+	items, err := a.listShare(ctx, shareID, shareTok, parent)
+	if err != nil {
+		return nil, err
+	}
+	base := strings.TrimRight(subPath, "/")
+	out := make([]cache.ShareEntry, 0, len(items))
+	for _, it := range items {
+		out = append(out, cache.ShareEntry{
+			Name:  it.Name,
+			Path:  base + "/" + it.Name,
+			IsDir: it.Type == "folder",
+			Size:  it.Size,
+		})
+	}
+	return out, nil
+}
+
 // IsHLS 阿里的 DirectURL 返回的是转码 HLS 播放列表。
 func (a *Aliyun) IsHLS() bool { return true }
 
