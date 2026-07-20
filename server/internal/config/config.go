@@ -1,12 +1,13 @@
 package config
 
 import (
-	"os"
-	"strconv"
+	"errors"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
-// Config 保存后端运行所需的全部配置，均来自环境变量。
+// Config 保存后端运行所需的全部配置（来自默认值 / 配置文件 / 环境变量）。
 type Config struct {
 	Port string // 后端监听端口
 
@@ -49,6 +50,17 @@ type Config struct {
 	AliyunTempFolderID     string // 转存目标临时目录的 file_id（小雅的 temp_transfer_folder_id）
 	AliyunDriveID          string // 自己盘 drive_id，留空则从 web token 自动获取
 
+	// 阿里各接口的基础域名（只抽域名，端点路径仍在代码里拼接）。
+	// 阿里改域名（如 aliyundrive.com → alipan.com）时只改这里，不用改代码。
+	AliyunAPIBase   string // 如 https://api.alipan.com
+	AliyunAuthBase  string // 如 https://auth.alipan.com
+	AliyunOpenBase  string // 如 https://openapi.alipan.com
+	AliyunUserBase  string // 如 https://user.alipan.com
+	AliyunBrowserUA string // 请求在线 token 服务时伪装的浏览器 UA
+
+	// HLSAllowedHosts 是 HLS 代理允许转发的上游主机白名单（防开放代理）。
+	HLSAllowedHosts []string
+
 	// VideoExts 认定为视频的扩展名（小写，含点），用于过滤目录项。
 	VideoExts []string
 }
@@ -58,63 +70,123 @@ func (c Config) JellyfinEnabled() bool {
 	return c.JellyfinBaseURL != "" && c.JellyfinAPIKey != ""
 }
 
-// Load 从环境变量读取配置，未设置的项使用合理默认值。
-func Load() Config {
+// 优先级：默认值 < 配置文件 < 环境变量。
+//
+// 嵌套配置键通过 viper 的 "." → "_" 映射自动对应环境变量：
+// 例如 openlist.base_url 对应 OPENLIST_BASE_URL —— 现有 docker 环境变量全部继续生效。
+func newViper(cfgFile string) (*viper.Viper, error) {
+	v := viper.New()
+	setDefaults(v)
+
+	// 环境变量覆盖（AutomaticEnv 只对已注册的键生效，setDefaults 已注册全部键）。
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	if cfgFile != "" {
+		v.SetConfigFile(cfgFile)
+	} else {
+		v.SetConfigName("conf")
+		v.SetConfigType("yaml")
+		v.AddConfigPath("./configs")
+		v.AddConfigPath(".")
+	}
+	// 配置文件可选：不存在不报错，只有解析出错才报错。
+	if err := v.ReadInConfig(); err != nil {
+		var nf viper.ConfigFileNotFoundError
+		if !errors.As(err, &nf) {
+			return nil, err
+		}
+	}
+	return v, nil
+}
+
+// setDefaults 注册所有配置键及默认值。
+func setDefaults(v *viper.Viper) {
+	v.SetDefault("server.port", "3001")
+
+	v.SetDefault("openlist.base_url", "http://openlist:5244")
+	v.SetDefault("openlist.username", "admin")
+	v.SetDefault("openlist.password", "")
+	v.SetDefault("openlist.root", "/")
+
+	v.SetDefault("jellyfin.base_url", "")
+	v.SetDefault("jellyfin.api_key", "")
+
+	v.SetDefault("media_dir", "/media")
+	v.SetDefault("site_url", "http://localhost:8090")
+	v.SetDefault("strm.mode", "hls")
+
+	v.SetDefault("db_path", "./ivideo.db")
+	v.SetDefault("cache.backend", "fake")
+	v.SetDefault("cache.dir", "/ivideo-cache")
+	v.SetDefault("cache.max_bytes", int64(200*1024*1024*1024)) // 200 GB
+	v.SetDefault("cache.ttl_hours", 72)
+	v.SetDefault("cache.clean_interval_minutes", 10)
+
+	v.SetDefault("aliyun.refresh_token", "")
+	v.SetDefault("aliyun.open_refresh_token", "")
+	v.SetDefault("aliyun.open_client_id", "")
+	v.SetDefault("aliyun.open_client_secret", "")
+	v.SetDefault("aliyun.open_token_url", "https://openapi.alipan.com/oauth/access_token")
+	v.SetDefault("aliyun.open_renew_url", "https://api.oplist.org/alicloud/renewapi")
+	v.SetDefault("aliyun.open_connector_url", "")
+	v.SetDefault("aliyun.temp_folder_id", "root")
+	v.SetDefault("aliyun.drive_id", "")
+	v.SetDefault("aliyun.api_base", "https://api.alipan.com")
+	v.SetDefault("aliyun.auth_base", "https://auth.alipan.com")
+	v.SetDefault("aliyun.open_base", "https://openapi.alipan.com")
+	v.SetDefault("aliyun.user_base", "https://user.alipan.com")
+	v.SetDefault("aliyun.browser_ua", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+	v.SetDefault("hls.allowed_hosts", []string{
+		"aliyundrive.com", "aliyundrive.net", "aliyundrive.cloud",
+		"alipan.com", "aliyuncs.com", "alicdn.com",
+	})
+}
+
+// Load 按「默认值 → 配置文件 → 环境变量」加载配置。cfgFile 为空则自动查找 ./conf/conf.json。
+func Load(cfgFile string) (Config, error) {
+	v, err := newViper(cfgFile)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
-		Port:             env("SERVER_PORT", "3001"),
-		OpenListBaseURL:  strings.TrimRight(env("OPENLIST_BASE_URL", "http://openlist:5244"), "/"),
-		OpenListUsername: env("OPENLIST_USERNAME", "admin"),
-		OpenListPassword: env("OPENLIST_PASSWORD", ""),
-		OpenListRoot:     env("OPENLIST_ROOT", "/"),
-		JellyfinBaseURL:  strings.TrimRight(env("JELLYFIN_BASE_URL", ""), "/"),
-		JellyfinAPIKey:   env("JELLYFIN_API_KEY", ""),
+		Port:             v.GetString("server.port"),
+		OpenListBaseURL:  strings.TrimRight(v.GetString("openlist.base_url"), "/"),
+		OpenListUsername: v.GetString("openlist.username"),
+		OpenListPassword: v.GetString("openlist.password"),
+		OpenListRoot:     v.GetString("openlist.root"),
+		JellyfinBaseURL:  strings.TrimRight(v.GetString("jellyfin.base_url"), "/"),
+		JellyfinAPIKey:   v.GetString("jellyfin.api_key"),
 
-		MediaDir: env("MEDIA_DIR", "/media"),
-		SiteURL:  strings.TrimRight(env("SITE_URL", "http://localhost:8090"), "/"),
-		StrmMode: env("STRM_MODE", "hls"),
+		MediaDir: v.GetString("media_dir"),
+		SiteURL:  strings.TrimRight(v.GetString("site_url"), "/"),
+		StrmMode: v.GetString("strm.mode"),
 
-		DBPath:             env("DB_PATH", "./ivideo.db"),
-		CacheBackend:       env("CACHE_BACKEND", "fake"),
-		CacheDir:           env("CACHE_DIR", "/ivideo-cache"),
-		CacheMaxBytes:      envInt64("CACHE_MAX_BYTES", 200*1024*1024*1024), // 默认 200 GB
-		CacheTTLHours:      envInt("CACHE_TTL_HOURS", 72),
-		CacheCleanInterval: envInt("CACHE_CLEAN_INTERVAL_MINUTES", 10),
+		DBPath:             v.GetString("db_path"),
+		CacheBackend:       v.GetString("cache.backend"),
+		CacheDir:           v.GetString("cache.dir"),
+		CacheMaxBytes:      v.GetInt64("cache.max_bytes"),
+		CacheTTLHours:      v.GetInt("cache.ttl_hours"),
+		CacheCleanInterval: v.GetInt("cache.clean_interval_minutes"),
 
-		AliyunRefreshToken:     env("ALIYUN_REFRESH_TOKEN", ""),
-		AliyunOpenRefreshToken: env("ALIYUN_OPEN_REFRESH_TOKEN", ""),
-		AliyunOpenClientID:     env("ALIYUN_OPEN_CLIENT_ID", ""),
-		AliyunOpenClientSecret: env("ALIYUN_OPEN_CLIENT_SECRET", ""),
-		AliyunOpenTokenURL:     env("ALIYUN_OPEN_TOKEN_URL", "https://openapi.alipan.com/oauth/access_token"),
-		AliyunOpenRenewURL:     env("ALIYUN_OPEN_RENEW_URL", "https://api.oplist.org/alicloud/renewapi"),
-		AliyunOpenConnectorURL: env("ALIYUN_OPEN_CONNECTOR_URL", ""),
-		AliyunTempFolderID:     env("ALIYUN_TEMP_FOLDER_ID", "root"),
-		AliyunDriveID:          env("ALIYUN_DRIVE_ID", ""),
+		AliyunRefreshToken:     v.GetString("aliyun.refresh_token"),
+		AliyunOpenRefreshToken: v.GetString("aliyun.open_refresh_token"),
+		AliyunOpenClientID:     v.GetString("aliyun.open_client_id"),
+		AliyunOpenClientSecret: v.GetString("aliyun.open_client_secret"),
+		AliyunOpenTokenURL:     v.GetString("aliyun.open_token_url"),
+		AliyunOpenRenewURL:     v.GetString("aliyun.open_renew_url"),
+		AliyunOpenConnectorURL: v.GetString("aliyun.open_connector_url"),
+		AliyunTempFolderID:     v.GetString("aliyun.temp_folder_id"),
+		AliyunDriveID:          v.GetString("aliyun.drive_id"),
+		AliyunAPIBase:          strings.TrimRight(v.GetString("aliyun.api_base"), "/"),
+		AliyunAuthBase:         strings.TrimRight(v.GetString("aliyun.auth_base"), "/"),
+		AliyunOpenBase:         strings.TrimRight(v.GetString("aliyun.open_base"), "/"),
+		AliyunUserBase:         strings.TrimRight(v.GetString("aliyun.user_base"), "/"),
+		AliyunBrowserUA:        v.GetString("aliyun.browser_ua"),
+
+		HLSAllowedHosts: v.GetStringSlice("hls.allowed_hosts"),
 
 		VideoExts: []string{".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".m4v", ".ts"},
-	}
-}
-
-func env(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-func envInt64(key string, def int64) int64 {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return n
-		}
-	}
-	return def
+	}, nil
 }

@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"ivideo/server/internal/resp"
 )
 
 // Video 是返回给前端的视频/目录条目，兼容 OpenList 与 Jellyfin 两种来源。
@@ -39,7 +41,7 @@ func (h *Handler) listOpenList(c *gin.Context) {
 	rel := c.Query("path")
 	items, err := h.ol.List(h.resolve(rel))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -59,24 +61,24 @@ func (h *Handler) listOpenList(c *gin.Context) {
 			Poster:   it.Thumb,
 		}
 		if !it.IsDir {
-			v.StreamURL = "/api/stream?source=openlist&path=" + childRel
+			v.StreamURL = APIPrefix + "/stream?source=openlist&path=" + childRel
 		}
 		out = append(out, v)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"source": "openlist", "path": rel, "items": out})
+	resp.OK(c, gin.H{"source": "openlist", "path": rel, "items": out})
 }
 
 // listJellyfin 列出 Jellyfin 片库中的影片。
 func (h *Handler) listJellyfin(c *gin.Context) {
 	if h.jf == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "未配置 Jellyfin"})
+		resp.Fail(c, http.StatusServiceUnavailable, "未配置 Jellyfin")
 		return
 	}
 	itemTypes := c.DefaultQuery("types", "Movie")
 	items, err := h.jf.Items(itemTypes)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -88,16 +90,16 @@ func (h *Handler) listJellyfin(c *gin.Context) {
 			ID:        it.ID,
 			Overview:  it.Overview,
 			Year:      it.ProductionYear,
-			StreamURL: "/api/stream?source=jellyfin&id=" + it.ID,
+			StreamURL: APIPrefix + "/stream?source=jellyfin&id=" + it.ID,
 		}
 		// 有主海报才给出代理地址
 		if _, ok := it.ImageTags["Primary"]; ok {
-			v.Poster = fmt.Sprintf("/api/image?source=jellyfin&id=%s", it.ID)
+			v.Poster = fmt.Sprintf("%s/image?source=jellyfin&id=%s", APIPrefix, it.ID)
 		}
 		out = append(out, v)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"source": "jellyfin", "items": out})
+	resp.OK(c, gin.H{"source": "jellyfin", "items": out})
 }
 
 // joinRel 拼接相对路径，始终以 / 开头。

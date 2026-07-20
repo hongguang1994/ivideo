@@ -9,22 +9,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"ivideo/server/internal/resp"
 )
 
-// 允许被 HLS 代理的上游主机(防止变成任意 URL 的开放代理)。
-var hlsAllowedHosts = []string{
-	"aliyundrive.com", // 如 pdsapi.aliyundrive.com(HD 转码流)
-	"aliyundrive.net", // 如 cn-beijing-video-preview.aliyundrive.net
-	"aliyundrive.cloud",
-	"alipan.com",
-	"aliyuncs.com",
-	"alicdn.com",
-}
-
-func hlsHostAllowed(host string) bool {
+// hlsHostAllowed 判断上游主机是否在配置的白名单里(防止变成任意 URL 的开放代理)。
+func (h *Handler) hlsHostAllowed(host string) bool {
 	host = strings.ToLower(host)
-	for _, s := range hlsAllowedHosts {
-		if strings.Contains(host, s) {
+	for _, s := range h.cfg.HLSAllowedHosts {
+		if s != "" && strings.Contains(host, strings.ToLower(s)) {
 			return true
 		}
 	}
@@ -40,7 +33,7 @@ func encodeUpstream(raw string) string {
 }
 
 // decodeUpstream 从 "<base64url>.ext" 还原上游地址。
-func decodeUpstream(name string) (string, bool) {
+func (h *Handler) decodeUpstream(name string) (string, bool) {
 	if i := strings.LastIndex(name, "."); i > 0 {
 		name = name[:i]
 	}
@@ -50,7 +43,7 @@ func decodeUpstream(name string) (string, bool) {
 	}
 	raw := string(b)
 	u, err := url.Parse(raw)
-	if err != nil || !hlsHostAllowed(u.Host) {
+	if err != nil || !h.hlsHostAllowed(u.Host) {
 		return "", false
 	}
 	return raw, true
@@ -66,7 +59,7 @@ func (h *Handler) HLSPlaylistFile(c *gin.Context) {
 	}
 	id, err := strconv.ParseInt(base, 10, 64)
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的资源文件名: " + name})
+		resp.Fail(c, http.StatusBadRequest, "非法的资源文件名: "+name)
 		return
 	}
 	h.servePlaylist(c, id)
@@ -75,9 +68,9 @@ func (h *Handler) HLSPlaylistFile(c *gin.Context) {
 // HLSSubPlaylist 处理被改写过的子播放列表。
 // GET /api/hlsp/<base64url>.m3u8
 func (h *Handler) HLSSubPlaylist(c *gin.Context) {
-	raw, ok := decodeUpstream(c.Param("name"))
+	raw, ok := h.decodeUpstream(c.Param("name"))
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的子播放列表地址"})
+		resp.Fail(c, http.StatusBadRequest, "非法的子播放列表地址")
 		return
 	}
 	h.renderPlaylist(c, raw)
@@ -102,7 +95,7 @@ func (h *Handler) servePlaylist(c *gin.Context, id int64) {
 	u, err := h.cache.StreamURL(id)
 	if err != nil {
 		// 未就绪(转存中):让客户端稍后重试。
-		c.JSON(http.StatusTooEarly, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusTooEarly, err.Error())
 		return
 	}
 	h.renderPlaylist(c, u)
@@ -111,18 +104,18 @@ func (h *Handler) servePlaylist(c *gin.Context, id int64) {
 // renderPlaylist 拉取上游 m3u8,把其中的地址改写成走本站同源代理。
 func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 	base, err := url.Parse(m3u8URL)
-	if err != nil || !hlsHostAllowed(base.Host) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的 m3u8 地址"})
+	if err != nil || !h.hlsHostAllowed(base.Host) {
+		resp.Fail(c, http.StatusBadRequest, "非法的 m3u8 地址")
 		return
 	}
 
-	resp, err := http.Get(m3u8URL)
+	httpResp, err := http.Get(m3u8URL)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	defer httpResp.Body.Close()
+	body, _ := io.ReadAll(httpResp.Body)
 
 	var b strings.Builder
 	for _, line := range strings.Split(string(body), "\n") {
@@ -141,9 +134,9 @@ func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 		abs := base.ResolveReference(ref).String()
 		enc := encodeUpstream(abs)
 		if strings.Contains(strings.ToLower(abs), ".m3u8") {
-			b.WriteString("/api/hlsp/" + enc + ".m3u8") // 子播放列表继续改写
+			b.WriteString(APIPrefix + "/hlsp/" + enc + ".m3u8") // 子播放列表继续改写
 		} else {
-			b.WriteString("/api/hls-seg/" + enc + ".ts") // 切片走代理，扩展名明确
+			b.WriteString(APIPrefix + "/hls-seg/" + enc + ".ts") // 切片走代理，扩展名明确
 		}
 		b.WriteByte('\n')
 	}
@@ -155,9 +148,9 @@ func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 // HLSSegmentFile 代理单个切片。
 // GET /api/hls-seg/<base64url>.ts
 func (h *Handler) HLSSegmentFile(c *gin.Context) {
-	raw, ok := decodeUpstream(c.Param("name"))
+	raw, ok := h.decodeUpstream(c.Param("name"))
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法切片地址"})
+		resp.Fail(c, http.StatusBadRequest, "非法切片地址")
 		return
 	}
 	h.proxyStream(c, raw)
@@ -168,8 +161,8 @@ func (h *Handler) HLSSegmentFile(c *gin.Context) {
 func (h *Handler) HLSSegment(c *gin.Context) {
 	raw := c.Query("u")
 	u, err := url.Parse(raw)
-	if err != nil || !hlsHostAllowed(u.Host) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法切片地址"})
+	if err != nil || !h.hlsHostAllowed(u.Host) {
+		resp.Fail(c, http.StatusBadRequest, "非法切片地址")
 		return
 	}
 	h.proxyStream(c, raw)

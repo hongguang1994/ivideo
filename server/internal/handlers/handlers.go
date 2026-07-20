@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/resp"
+
 	"ivideo/server/internal/cache"
 	"ivideo/server/internal/config"
 	"ivideo/server/internal/jellyfin"
@@ -21,12 +23,12 @@ type Handler struct {
 	cfg   config.Config
 	ol    *openlist.Client
 	jf    *jellyfin.Client // 可能为 nil（未配置 Jellyfin 时）
-	store *store.Store
+	store store.Store
 	cache *cache.Manager
 }
 
 // New 创建 Handler。jf 为 nil 表示未启用 Jellyfin。
-func New(cfg config.Config, ol *openlist.Client, jf *jellyfin.Client, st *store.Store, cm *cache.Manager) *Handler {
+func New(cfg config.Config, ol *openlist.Client, jf *jellyfin.Client, st store.Store, cm *cache.Manager) *Handler {
 	return &Handler{cfg: cfg, ol: ol, jf: jf, store: st, cache: cm}
 }
 
@@ -54,7 +56,7 @@ func parseID(c *gin.Context, key string) (int64, bool) {
 	raw := c.Query(key)
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少或非法的 " + key + " 参数"})
+		resp.Fail(c, http.StatusBadRequest, "缺少或非法的 "+key+" 参数")
 		return 0, false
 	}
 	return id, true
@@ -68,25 +70,25 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 func (h *Handler) proxyStream(c *gin.Context, upstream string) {
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, upstream, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if r := c.GetHeader("Range"); r != "" {
 		req.Header.Set("Range", r)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	httpResp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer httpResp.Body.Close()
 
 	for _, hk := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified"} {
-		if v := resp.Header.Get(hk); v != "" {
+		if v := httpResp.Header.Get(hk); v != "" {
 			c.Header(hk, v)
 		}
 	}
-	c.Status(resp.StatusCode)
-	io.Copy(c.Writer, resp.Body)
+	c.Status(httpResp.StatusCode)
+	io.Copy(c.Writer, httpResp.Body)
 }

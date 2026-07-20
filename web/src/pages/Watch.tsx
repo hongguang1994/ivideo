@@ -62,9 +62,9 @@ export default function Watch() {
   // ---- OpenList / Jellyfin 直读模式 ----
   let directUrl = "";
   if (source === "jellyfin" && id) {
-    directUrl = `/api/stream?source=jellyfin&id=${encodeURIComponent(id)}`;
+    directUrl = `/api/v1/stream?source=jellyfin&id=${encodeURIComponent(id)}`;
   } else if (source === "openlist" && path) {
-    directUrl = `/api/stream?source=openlist&path=${encodeURIComponent(path)}`;
+    directUrl = `/api/v1/stream?source=openlist&path=${encodeURIComponent(path)}`;
   }
   if (!directUrl) return <p className="muted">缺少视频参数。</p>;
 

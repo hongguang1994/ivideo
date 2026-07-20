@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"ivideo/server/internal/resp"
 )
 
 // Stream 按来源取播放地址并代理转发，透传 Range 以支持进度拖动。
@@ -30,7 +32,7 @@ func (h *Handler) streamCache(c *gin.Context) {
 	rawURL, err := h.cache.StreamURL(id)
 	if err != nil {
 		// 尚未就绪：告诉客户端稍后重试（425 Too Early）。
-		c.JSON(http.StatusTooEarly, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusTooEarly, err.Error())
 		return
 	}
 	h.proxyStream(c, rawURL)
@@ -40,12 +42,12 @@ func (h *Handler) streamCache(c *gin.Context) {
 func (h *Handler) streamOpenList(c *gin.Context) {
 	rel := c.Query("path")
 	if rel == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 path 参数")
 		return
 	}
 	rawURL, err := h.ol.RawURL(h.resolve(rel))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
 	h.proxyStream(c, rawURL)
@@ -54,12 +56,12 @@ func (h *Handler) streamOpenList(c *gin.Context) {
 // streamJellyfin 代理转发 Jellyfin 的直连播放流。
 func (h *Handler) streamJellyfin(c *gin.Context) {
 	if h.jf == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "未配置 Jellyfin"})
+		resp.Fail(c, http.StatusServiceUnavailable, "未配置 Jellyfin")
 		return
 	}
 	id := c.Query("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 id 参数"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 id 参数")
 		return
 	}
 	h.proxyStream(c, h.jf.StreamURL(id))

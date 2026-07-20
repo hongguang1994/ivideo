@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/resp"
+
 	"ivideo/server/internal/store"
 )
 
@@ -24,7 +26,7 @@ func (h *Handler) FileGateway(c *gin.Context) {
 	}
 	id, err := strconv.ParseInt(base, 10, 64)
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的资源文件名: " + name})
+		resp.Fail(c, http.StatusBadRequest, "非法的资源文件名: "+name)
 		return
 	}
 
@@ -48,7 +50,7 @@ func (h *Handler) FileGateway(c *gin.Context) {
 	url, err := h.cache.OriginalURL(id)
 	if err != nil {
 		// 未就绪(转存中)时告诉客户端稍后重试。
-		c.JSON(http.StatusTooEarly, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusTooEarly, err.Error())
 		return
 	}
 	c.Redirect(http.StatusFound, url)

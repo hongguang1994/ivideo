@@ -11,7 +11,7 @@ import (
 
 // Manager 负责“确保已转存”的编排：点播 → 若未缓存则后台转存（并发去重）→ 就绪后给直链。
 type Manager struct {
-	store    *store.Store
+	store    store.Store
 	backend  CacheBackend
 	cacheDir string
 
@@ -20,7 +20,7 @@ type Manager struct {
 }
 
 // NewManager 创建缓存管理器。
-func NewManager(st *store.Store, backend CacheBackend, cacheDir string) *Manager {
+func NewManager(st store.Store, backend CacheBackend, cacheDir string) *Manager {
 	return &Manager{
 		store:    st,
 		backend:  backend,
@@ -99,6 +99,9 @@ func (m *Manager) SaveShare(share ShareRef, srcPath, targetFolder string) error 
 	}
 	return p.SaveToFolder(context.Background(), share, srcPath, targetFolder)
 }
+
+// BackendName 返回当前缓存盘适配器名。
+func (m *Manager) BackendName() string { return m.backend.Name() }
 
 // IsHLS 表示当前适配器的播放地址是否为 HLS。
 func (m *Manager) IsHLS() bool {

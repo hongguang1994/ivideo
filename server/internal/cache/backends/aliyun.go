@@ -44,6 +44,13 @@ type Aliyun struct {
 	openRenewURL     string
 	openConnectorURL string
 
+	// 各接口基础域名(端点路径在代码里拼接) + 伪装 UA
+	apiBase   string
+	authBase  string
+	openBase  string
+	userBase  string
+	browserUA string
+
 	http *http.Client
 
 	mu        sync.Mutex
@@ -66,6 +73,11 @@ func NewAliyun(cfg config.Config, tokens TokenStore) *Aliyun {
 		openTokenURL:     cfg.AliyunOpenTokenURL,
 		openRenewURL:     cfg.AliyunOpenRenewURL,
 		openConnectorURL: cfg.AliyunOpenConnectorURL,
+		apiBase:          cfg.AliyunAPIBase,
+		authBase:         cfg.AliyunAuthBase,
+		openBase:         cfg.AliyunOpenBase,
+		userBase:         cfg.AliyunUserBase,
+		browserUA:        cfg.AliyunBrowserUA,
 		http:             &http.Client{Timeout: 30 * time.Second},
 	}
 }

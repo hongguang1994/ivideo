@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/resp"
+
 	"ivideo/server/internal/store"
 )
 
@@ -14,10 +16,10 @@ import (
 func (h *Handler) ListResources(c *gin.Context) {
 	items, err := h.store.ListResources()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	resp.OK(c, gin.H{"items": items})
 }
 
 // AddResource 新增一条资源。
@@ -25,20 +27,20 @@ func (h *Handler) ListResources(c *gin.Context) {
 func (h *Handler) AddResource(c *gin.Context) {
 	var r store.Resource
 	if err := c.ShouldBindJSON(&r); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if r.Title == "" || r.ShareURL == "" || r.Provider == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "title、provider、shareUrl 必填"})
+		resp.Fail(c, http.StatusBadRequest, "title、provider、shareUrl 必填")
 		return
 	}
 	id, err := h.store.AddResource(r)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	r.ID = id
-	c.JSON(http.StatusOK, r)
+	resp.OK(c, r)
 }
 
 // Play 触发/查询某资源的转存状态；就绪则返回可播地址。
@@ -50,31 +52,31 @@ func (h *Handler) Play(c *gin.Context) {
 	}
 	item, err := h.cache.EnsureReady(id)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	resp := gin.H{"status": item.Status}
+	out := gin.H{"status": item.Status}
 	switch item.Status {
 	case store.StatusReady:
 		// 实时取播放地址(HLS 短时有效),判断类型后走对应的同源代理。
 		url, err := h.cache.StreamURL(id)
 		if err != nil {
 			// 取地址失败时按“转存中”让前端继续轮询。
-			resp["status"] = store.StatusTransferring
-			resp["message"] = "正在准备播放地址…"
+			out["status"] = store.StatusTransferring
+			out["message"] = "正在准备播放地址…"
 			break
 		}
 		if h.cache.IsHLS() || strings.Contains(strings.ToLower(url), ".m3u8") {
-			resp["type"] = "hls"
-			resp["streamUrl"] = "/api/hls?resource=" + itoa(id) // 代理并改写切片,规避跨域
+			out["type"] = "hls"
+			out["streamUrl"] = APIPrefix + "/hls?resource=" + itoa(id) // 代理并改写切片,规避跨域
 		} else {
-			resp["type"] = "direct"
-			resp["streamUrl"] = "/api/stream?source=cache&resource=" + itoa(id)
+			out["type"] = "direct"
+			out["streamUrl"] = APIPrefix + "/stream?source=cache&resource=" + itoa(id)
 		}
 	case store.StatusTransferring, store.StatusUncached:
-		resp["message"] = "正在转存到网盘，请稍候…"
+		out["message"] = "正在转存到网盘，请稍候…"
 	case store.StatusFailed:
-		resp["message"] = "转存失败：" + item.Error
+		out["message"] = "转存失败：" + item.Error
 	}
-	c.JSON(http.StatusOK, resp)
+	resp.OK(c, out)
 }

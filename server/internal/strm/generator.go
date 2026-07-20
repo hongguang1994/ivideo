@@ -27,18 +27,25 @@ type Result struct {
 
 // Generator 生成 strm 媒体库。
 type Generator struct {
-	store    *store.Store
-	mediaDir string
-	siteURL  string
-	mode     string // hls(默认,流畅) / original(原画,需不限速账号)
+	store     store.Store
+	mediaDir  string
+	siteURL   string
+	mode      string // hls(默认,流畅) / original(原画,需不限速账号)
+	apiPrefix string // 接口前缀,如 /api/v1
 }
 
-// New 创建生成器。mode 为 "hls" 或 "original"。
-func New(st *store.Store, mediaDir, siteURL, mode string) *Generator {
+// New 创建生成器。mode 为 "hls" 或 "original"；apiPrefix 如 /api/v1。
+func New(st store.Store, mediaDir, siteURL, mode, apiPrefix string) *Generator {
 	if mode != "original" {
 		mode = "hls"
 	}
-	return &Generator{store: st, mediaDir: mediaDir, siteURL: strings.TrimRight(siteURL, "/"), mode: mode}
+	return &Generator{
+		store:     st,
+		mediaDir:  mediaDir,
+		siteURL:   strings.TrimRight(siteURL, "/"),
+		mode:      mode,
+		apiPrefix: strings.TrimRight(apiPrefix, "/"),
+	}
 }
 
 // Generate 全量重建 strm 媒体库：为每个资源写一个 strm，并清理孤儿文件。
@@ -89,9 +96,9 @@ func (g *Generator) writeOne(r store.Resource) (string, error) {
 	}
 
 	// hls 模式指向转码流(阿里对原画下载限速，转码流快得多)；original 指向原画直链。
-	content := fmt.Sprintf("%s/api/hls/%d.m3u8", g.siteURL, r.ID)
+	content := fmt.Sprintf("%s%s/hls/%d.m3u8", g.siteURL, g.apiPrefix, r.ID)
 	if g.mode == "original" {
-		content = fmt.Sprintf("%s/api/file/%d%s", g.siteURL, r.ID, ext(r.FilePath))
+		content = fmt.Sprintf("%s%s/file/%d%s", g.siteURL, g.apiPrefix, r.ID, ext(r.FilePath))
 	}
 	absFile := filepath.Join(g.mediaDir, relFile)
 

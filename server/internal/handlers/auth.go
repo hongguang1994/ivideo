@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/resp"
+
 	"ivideo/server/internal/aliauth"
 )
 
@@ -14,7 +16,7 @@ import (
 func (h *Handler) Providers(c *gin.Context) {
 	m, err := h.store.ListCredentialProviders()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// 固定列出支持的网盘,标注是否已授权。
@@ -24,7 +26,7 @@ func (h *Handler) Providers(c *gin.Context) {
 		{"provider": "115", "name": "115网盘", "authMethod": "cookie", "authorized": m["115"]},
 		{"provider": "quark", "name": "夸克网盘", "authMethod": "cookie", "authorized": m["quark"]},
 	}
-	c.JSON(http.StatusOK, gin.H{"providers": out})
+	resp.OK(c, gin.H{"providers": out})
 }
 
 // SaveToken 保存某网盘的凭据(目前用于阿里开放接口 refresh token / 将来 115、夸克 cookie)。
@@ -36,13 +38,13 @@ func (h *Handler) SaveToken(c *gin.Context) {
 		Extra    string `json:"extra"` // 阿里开放接口:alicloud_qr / alicloud_tv
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Provider == "" || req.Token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 provider / token"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 provider / token")
 		return
 	}
 	switch req.Provider {
 	case "aliyun_open", "115", "quark":
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 provider: " + req.Provider})
+		resp.Fail(c, http.StatusBadRequest, "不支持的 provider: "+req.Provider)
 		return
 	}
 	extra := strings.TrimSpace(req.Extra)
@@ -50,10 +52,10 @@ func (h *Handler) SaveToken(c *gin.Context) {
 		extra = "alicloud_qr"
 	}
 	if err := h.store.SetCredential(req.Provider, strings.TrimSpace(req.Token), extra); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	resp.OK(c, gin.H{"ok": true})
 }
 
 // AliyunQR 申请阿里云盘登录二维码。
@@ -61,10 +63,10 @@ func (h *Handler) SaveToken(c *gin.Context) {
 func (h *Handler) AliyunQR(c *gin.Context) {
 	sess, err := aliauth.Generate(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, sess)
+	resp.OK(c, sess)
 }
 
 // AliyunQRStatus 轮询扫码状态;已确认则把 refresh_token 存库。
@@ -75,19 +77,19 @@ func (h *Handler) AliyunQRStatus(c *gin.Context) {
 		Ck string `json:"ck"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.T == "" || req.Ck == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 t / ck"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 t / ck")
 		return
 	}
 	res, err := aliauth.Query(c.Request.Context(), req.T, req.Ck)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
 	if res.Status == aliauth.StatusConfirmed && res.RefreshToken != "" {
 		if err := h.store.SetCredentialToken("aliyun", res.RefreshToken); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 token 失败: " + err.Error()})
+			resp.Fail(c, http.StatusInternalServerError, "保存 token 失败: "+err.Error())
 			return
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"status": res.Status})
+	resp.OK(c, gin.H{"status": res.Status})
 }

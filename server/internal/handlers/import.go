@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/resp"
+
 	"ivideo/server/internal/cache"
 	"ivideo/server/internal/store"
 )
@@ -22,7 +24,7 @@ const (
 func (h *Handler) BrowseShare(c *gin.Context) {
 	shareURL := c.Query("shareUrl")
 	if shareURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 shareUrl"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 shareUrl")
 		return
 	}
 	entries, err := h.cache.ListShare(cache.ShareRef{
@@ -31,10 +33,10 @@ func (h *Handler) BrowseShare(c *gin.Context) {
 		SharePwd: c.Query("sharePwd"),
 	}, c.Query("path"))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": entries})
+	resp.OK(c, gin.H{"items": entries})
 }
 
 // SaveShareItem 把分享内某个文件/文件夹手动转存到自己盘指定目录(默认 ivideo)。
@@ -49,7 +51,7 @@ func (h *Handler) SaveShareItem(c *gin.Context) {
 		Provider     string `json:"provider"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.ShareURL == "" || req.Path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 shareUrl 或 path"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 shareUrl 或 path")
 		return
 	}
 	if req.Provider == "" {
@@ -64,10 +66,10 @@ func (h *Handler) SaveShareItem(c *gin.Context) {
 		SharePwd: req.SharePwd,
 	}, req.Path, req.TargetFolder)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "targetFolder": req.TargetFolder})
+	resp.OK(c, gin.H{"ok": true, "targetFolder": req.TargetFolder})
 }
 
 // ImportShare 递归遍历一个分享，为其中每个视频文件建一条资源。
@@ -81,7 +83,7 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		Provider string `json:"provider"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.ShareURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 shareUrl"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 shareUrl")
 		return
 	}
 	if req.Provider == "" {
@@ -151,15 +153,15 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		}
 	}
 
-	resp := gin.H{"added": added, "skipped": skipped}
+	out := gin.H{"added": added, "skipped": skipped}
 	if len(errs) > 0 {
 		if len(errs) > 5 {
 			errs = errs[:5]
 		}
-		resp["errors"] = errs
+		out["errors"] = errs
 	}
 	if added >= importMaxFiles {
-		resp["note"] = "已达单次导入上限，可对子目录再次导入"
+		out["note"] = "已达单次导入上限，可对子目录再次导入"
 	}
-	c.JSON(http.StatusOK, resp)
+	resp.OK(c, out)
 }

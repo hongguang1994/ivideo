@@ -13,23 +13,19 @@ import (
 	"time"
 )
 
-// 阿里云盘 web 接口地址（纯 web 单套，配合扫码拿到的 refresh_token）。
+// 阿里云盘各接口的路径（域名从配置读，见 Aliyun 的 apiBase/authBase/openBase/userBase）。
 const (
-	aliWebTokenURL     = "https://auth.alipan.com/v2/account/token"                   // web refresh → access token
-	aliShareTokenURL   = "https://api.alipan.com/v2/share_link/get_share_token"       // 分享 token
-	aliShareListURL    = "https://api.alipan.com/adrive/v3/file/list"                 // 列分享内文件
-	aliCopyURL         = "https://api.alipan.com/adrive/v2/file/copy"                 // 转存(分享→自己盘)
-	aliVideoPreviewURL = "https://api.alipan.com/v2/file/get_video_preview_play_info" // 转码 HLS 播放地址
-	aliDeleteURL       = "https://api.alipan.com/v3/file/delete"                      // 删除(进回收站)
-	aliClearTrashURL   = "https://api.alipan.com/v2/recyclebin/clear"                 // 清空回收站
-	aliCreateFolderURL = "https://api.alipan.com/adrive/v2/file/createWithFolders"    // 创建文件夹
-
-	// 开放接口(取原画直链)
-	aliOpenDownloadURL = "https://openapi.alipan.com/adrive/v1.0/openFile/getDownloadUrl"
+	pathAccountToken    = "/v2/account/token"                    // authBase：web refresh → access token
+	pathShareToken      = "/v2/share_link/get_share_token"       // apiBase：分享 token
+	pathFileList        = "/adrive/v3/file/list"                 // apiBase：列分享内文件
+	pathFileCopy        = "/adrive/v2/file/copy"                 // apiBase：转存(分享→自己盘)
+	pathVideoPreview    = "/v2/file/get_video_preview_play_info" // apiBase：转码 HLS 播放地址
+	pathFileDelete      = "/v3/file/delete"                      // apiBase：删除(进回收站)
+	pathRecyclebinClear = "/v2/recyclebin/clear"                 // apiBase：清空回收站
+	pathCreateFolder    = "/adrive/v2/file/createWithFolders"    // apiBase：创建文件夹
+	pathUserGet         = "/v2/user/get"                         // userBase：取网盘信息
+	pathOpenDownload    = "/adrive/v1.0/openFile/getDownloadUrl" // openBase：开放接口取原画直链
 )
-
-// browserUA 用于绕过 Cloudflare 对非浏览器客户端的拦截(见 openAccessToken)。
-const browserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 // doJSON 发一个 JSON 请求并把响应解到 out；非 2xx 返回带响应体的错误。
 func (a *Aliyun) doJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
@@ -95,7 +91,7 @@ func (a *Aliyun) webToken(ctx context.Context) (string, error) {
 		ExpiresIn    int    `json:"expires_in"`
 	}
 	body := map[string]string{"grant_type": "refresh_token", "refresh_token": rt}
-	if err := a.doJSON(ctx, aliWebTokenURL, nil, body, &out); err != nil {
+	if err := a.doJSON(ctx, a.authBase+pathAccountToken, nil, body, &out); err != nil {
 		return "", fmt.Errorf("刷新 token 失败: %w", err)
 	}
 	if out.AccessToken == "" {
@@ -137,7 +133,7 @@ func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
 		DefaultDriveID  string `json:"default_drive_id"`
 	}
 	headers := map[string]string{"Authorization": "Bearer " + accessTok}
-	if err := a.doJSON(ctx, "https://user.alipan.com/v2/user/get", headers, map[string]any{}, &out); err != nil {
+	if err := a.doJSON(ctx, a.userBase+pathUserGet, headers, map[string]any{}, &out); err != nil {
 		return fmt.Errorf("获取网盘信息失败: %w", err)
 	}
 	d := out.ResourceDriveID // 优先资源盘（转存/HLS 更稳）
@@ -213,7 +209,7 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		}
 		// api.oplist.org 在 Cloudflare 后面，默认的 Go-http-client UA 会被
 		// 浏览器完整性检查拦掉(HTTP 403 / error code: 1010)，故伪装成常规浏览器。
-		req.Header.Set("User-Agent", browserUA)
+		req.Header.Set("User-Agent", a.browserUA)
 		req.Header.Set("Accept", "application/json, text/plain, */*")
 		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 		resp, err := a.http.Do(req)
@@ -272,7 +268,7 @@ func (a *Aliyun) originalURL(ctx context.Context, openTok, fileID string) (strin
 	var out struct {
 		URL string `json:"url"`
 	}
-	if err := a.doJSON(ctx, aliOpenDownloadURL, headers, body, &out); err != nil {
+	if err := a.doJSON(ctx, a.openBase+pathOpenDownload, headers, body, &out); err != nil {
 		return "", err
 	}
 	if out.URL == "" {
@@ -287,7 +283,7 @@ func (a *Aliyun) shareToken(ctx context.Context, shareID, sharePwd string) (stri
 		ShareToken string `json:"share_token"`
 	}
 	body := map[string]string{"share_id": shareID, "share_pwd": sharePwd}
-	if err := a.doJSON(ctx, aliShareTokenURL, nil, body, &out); err != nil {
+	if err := a.doJSON(ctx, a.apiBase+pathShareToken, nil, body, &out); err != nil {
 		return "", err
 	}
 	if out.ShareToken == "" {
@@ -327,7 +323,7 @@ func (a *Aliyun) listShare(ctx context.Context, shareID, shareTok, parentID stri
 			Items      []shareItem `json:"items"`
 			NextMarker string      `json:"next_marker"`
 		}
-		if err := a.doJSON(ctx, aliShareListURL, headers, body, &out); err != nil {
+		if err := a.doJSON(ctx, a.apiBase+pathFileList, headers, body, &out); err != nil {
 			return nil, err
 		}
 		items = append(items, out.Items...)
@@ -386,7 +382,7 @@ func (a *Aliyun) copyFromShare(ctx context.Context, accessTok, shareID, shareTok
 		FileID      string `json:"file_id"`
 		AsyncTaskID string `json:"async_task_id"`
 	}
-	if err := a.doJSON(ctx, aliCopyURL, headers, body, &out); err != nil {
+	if err := a.doJSON(ctx, a.apiBase+pathFileCopy, headers, body, &out); err != nil {
 		return "", err
 	}
 	if out.FileID != "" {
@@ -411,7 +407,7 @@ func (a *Aliyun) ensureFolderPath(ctx context.Context, accessTok, folderPath str
 		var out struct {
 			FileID string `json:"file_id"`
 		}
-		if err := a.doJSON(ctx, aliCreateFolderURL, headers, body, &out); err != nil {
+		if err := a.doJSON(ctx, a.apiBase+pathCreateFolder, headers, body, &out); err != nil {
 			return "", err
 		}
 		if out.FileID == "" {
@@ -439,7 +435,7 @@ func (a *Aliyun) copyShareItemTo(ctx context.Context, accessTok, shareID, shareT
 		FileID      string `json:"file_id"`
 		AsyncTaskID string `json:"async_task_id"`
 	}
-	if err := a.doJSON(ctx, aliCopyURL, headers, body, &out); err != nil {
+	if err := a.doJSON(ctx, a.apiBase+pathFileCopy, headers, body, &out); err != nil {
 		return "", err
 	}
 	if out.FileID != "" {
@@ -490,7 +486,7 @@ func (a *Aliyun) playURL(ctx context.Context, accessTok, fileID string) (string,
 			} `json:"live_transcoding_task_list"`
 		} `json:"video_preview_play_info"`
 	}
-	if err := a.doJSON(ctx, aliVideoPreviewURL, headers, body, &out); err != nil {
+	if err := a.doJSON(ctx, a.apiBase+pathVideoPreview, headers, body, &out); err != nil {
 		return "", err
 	}
 	// 取【画质最高】且已完成的档位。阿里按源分辨率提供:
@@ -515,14 +511,14 @@ func (a *Aliyun) playURL(ctx context.Context, accessTok, fileID string) (string,
 func (a *Aliyun) deleteFile(ctx context.Context, accessTok, fileID string) error {
 	headers := map[string]string{"Authorization": "Bearer " + accessTok}
 	body := map[string]any{"drive_id": a.driveID, "file_id": fileID}
-	return a.doJSON(ctx, aliDeleteURL, headers, body, nil)
+	return a.doJSON(ctx, a.apiBase+pathFileDelete, headers, body, nil)
 }
 
 // clearTrash 清空回收站，真正释放配额。
 func (a *Aliyun) clearTrash(ctx context.Context, accessTok string) error {
 	headers := map[string]string{"Authorization": "Bearer " + accessTok}
 	body := map[string]any{"drive_id": a.driveID}
-	return a.doJSON(ctx, aliClearTrashURL, headers, body, nil)
+	return a.doJSON(ctx, a.apiBase+pathRecyclebinClear, headers, body, nil)
 }
 
 // splitPath 把 "/a/b/c" 切成 [a b c]。
