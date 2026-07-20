@@ -62,6 +62,7 @@ services:
       - CACHE_TTL_HOURS=${CACHE_TTL_HOURS:-72}
       - CACHE_CLEAN_INTERVAL_MINUTES=${CACHE_CLEAN_INTERVAL_MINUTES:-10}
       - ALIYUN_REFRESH_TOKEN=${ALIYUN_REFRESH_TOKEN:-}
+      - ALIYUN_TEMP_FOLDER_ID=${ALIYUN_TEMP_FOLDER_ID:-root}
       - GIN_MODE=release
     volumes:
       - ./data/server:/data
