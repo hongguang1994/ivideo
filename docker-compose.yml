@@ -68,6 +68,8 @@ services:
       # strm 媒体库(与 jellyfin 共享同一目录)
       - MEDIA_DIR=/media
       - SITE_URL=${SITE_URL:-http://localhost:8090}
+      # strm 指向:hls(转码,流畅) / original(原画,需不限速账号如 TV token)
+      - STRM_MODE=${STRM_MODE:-hls}
       - GIN_MODE=release
     volumes:
       - ./data/server:/data
