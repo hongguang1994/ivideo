@@ -12,7 +12,14 @@ import (
 )
 
 // 允许被 HLS 代理的上游主机(防止变成任意 URL 的开放代理)。
-var hlsAllowedHosts = []string{"aliyundrive.net", "aliyundrive.cloud", "alipan.com", "aliyuncs.com"}
+var hlsAllowedHosts = []string{
+	"aliyundrive.com", // 如 pdsapi.aliyundrive.com(HD 转码流)
+	"aliyundrive.net", // 如 cn-beijing-video-preview.aliyundrive.net
+	"aliyundrive.cloud",
+	"alipan.com",
+	"aliyuncs.com",
+	"alicdn.com",
+}
 
 func hlsHostAllowed(host string) bool {
 	host = strings.ToLower(host)
