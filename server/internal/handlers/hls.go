@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -22,25 +23,49 @@ func hlsHostAllowed(host string) bool {
 	return false
 }
 
-// HLSPlaylist 代理并改写 m3u8：把相对切片地址改成走本站同源代理,规避阿里 CDN 跨域。
+// HLSPlaylistFile 是带 .m3u8 后缀的入口,供 strm / 播放器按扩展名识别。
+// GET /api/hls/<资源ID>.m3u8
+func (h *Handler) HLSPlaylistFile(c *gin.Context) {
+	name := c.Param("name")
+	base := name
+	if i := strings.LastIndex(base, "."); i > 0 {
+		base = base[:i]
+	}
+	id, err := strconv.ParseInt(base, 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的资源文件名: " + name})
+		return
+	}
+	h.servePlaylist(c, id)
+}
+
+// HLSPlaylist 代理并改写 m3u8。
 // GET /api/hls?resource=<id>   或   GET /api/hls?url=<绝对 m3u8 地址>
 func (h *Handler) HLSPlaylist(c *gin.Context) {
-	var m3u8URL string
 	if raw := c.Query("url"); raw != "" {
-		m3u8URL = raw
-	} else {
-		id, ok := parseID(c, "resource")
-		if !ok {
-			return
-		}
-		u, err := h.cache.StreamURL(id)
-		if err != nil {
-			c.JSON(http.StatusTooEarly, gin.H{"error": err.Error()})
-			return
-		}
-		m3u8URL = u
+		h.renderPlaylist(c, raw)
+		return
 	}
+	id, ok := parseID(c, "resource")
+	if !ok {
+		return
+	}
+	h.servePlaylist(c, id)
+}
 
+// servePlaylist 确保资源已转存,取到 HLS 地址后改写输出。
+func (h *Handler) servePlaylist(c *gin.Context, id int64) {
+	u, err := h.cache.StreamURL(id)
+	if err != nil {
+		// 未就绪(转存中):让客户端稍后重试。
+		c.JSON(http.StatusTooEarly, gin.H{"error": err.Error()})
+		return
+	}
+	h.renderPlaylist(c, u)
+}
+
+// renderPlaylist 拉取上游 m3u8,把其中的地址改写成走本站同源代理,规避阿里 CDN 跨域。
+func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 	base, err := url.Parse(m3u8URL)
 	if err != nil || !hlsHostAllowed(base.Host) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的 m3u8 地址"})

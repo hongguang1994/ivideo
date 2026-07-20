@@ -30,11 +30,15 @@ type Generator struct {
 	store    *store.Store
 	mediaDir string
 	siteURL  string
+	mode     string // hls(默认,流畅) / original(原画,需不限速账号)
 }
 
-// New 创建生成器。
-func New(st *store.Store, mediaDir, siteURL string) *Generator {
-	return &Generator{store: st, mediaDir: mediaDir, siteURL: strings.TrimRight(siteURL, "/")}
+// New 创建生成器。mode 为 "hls" 或 "original"。
+func New(st *store.Store, mediaDir, siteURL, mode string) *Generator {
+	if mode != "original" {
+		mode = "hls"
+	}
+	return &Generator{store: st, mediaDir: mediaDir, siteURL: strings.TrimRight(siteURL, "/"), mode: mode}
 }
 
 // Generate 全量重建 strm 媒体库：为每个资源写一个 strm，并清理孤儿文件。
@@ -84,7 +88,11 @@ func (g *Generator) writeOne(r store.Resource) (string, error) {
 		return "", err
 	}
 
-	content := fmt.Sprintf("%s/api/file/%d%s", g.siteURL, r.ID, ext(r.FilePath))
+	// hls 模式指向转码流(阿里对原画下载限速，转码流快得多)；original 指向原画直链。
+	content := fmt.Sprintf("%s/api/hls/%d.m3u8", g.siteURL, r.ID)
+	if g.mode == "original" {
+		content = fmt.Sprintf("%s/api/file/%d%s", g.siteURL, r.ID, ext(r.FilePath))
+	}
 	absFile := filepath.Join(g.mediaDir, relFile)
 
 	// 内容没变就不重写，避免无谓地改动 mtime 触发 Jellyfin 重扫。

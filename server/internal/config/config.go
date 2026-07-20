@@ -21,6 +21,11 @@ type Config struct {
 	// ---- strm 媒体库(给 Emby/Jellyfin 扫描)----
 	MediaDir string // strm 落地目录(容器内路径)
 	SiteURL  string // strm 里写的站点地址，如 http://192.168.50.140:8090
+	// StrmMode 决定 strm 指向哪条通道：
+	//   hls      —— 转码 HLS(默认)。阿里对免费账号的**原画下载限速**约 0.5MB/s，
+	//               而转码流约 3.7MB/s，故默认用 HLS 保证流畅。
+	//   original —— 原画直链。画质最好，适合开了会员/不限速的账号。
+	StrmMode string
 
 	// ---- 按需转存缓存 ----
 	DBPath             string // SQLite 文件路径
@@ -62,6 +67,7 @@ func Load() Config {
 
 		MediaDir: env("MEDIA_DIR", "/media"),
 		SiteURL:  strings.TrimRight(env("SITE_URL", "http://localhost:8090"), "/"),
+		StrmMode: env("STRM_MODE", "hls"),
 
 		DBPath:             env("DB_PATH", "./ivideo.db"),
 		CacheBackend:       env("CACHE_BACKEND", "fake"),
