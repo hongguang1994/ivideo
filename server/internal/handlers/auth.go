@@ -33,6 +33,7 @@ func (h *Handler) SaveToken(c *gin.Context) {
 	var req struct {
 		Provider string `json:"provider"`
 		Token    string `json:"token"`
+		Extra    string `json:"extra"` // 阿里开放接口:alicloud_qr / alicloud_tv
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Provider == "" || req.Token == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 provider / token"})
@@ -44,7 +45,11 @@ func (h *Handler) SaveToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 provider: " + req.Provider})
 		return
 	}
-	if err := h.store.SetCredentialToken(req.Provider, strings.TrimSpace(req.Token)); err != nil {
+	extra := strings.TrimSpace(req.Extra)
+	if req.Provider == "aliyun_open" && extra == "" {
+		extra = "alicloud_qr"
+	}
+	if err := h.store.SetCredential(req.Provider, strings.TrimSpace(req.Token), extra); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

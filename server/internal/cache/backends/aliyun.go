@@ -15,6 +15,10 @@ import (
 // TokenStore 供适配器读写持久化的网盘凭据（扫码写入的 refresh_token，轮换后回写）。
 type TokenStore interface {
 	GetToken(provider string) string
+	// GetTokenExtra 取凭据的附加信息。阿里开放接口用它存 driver 类型：
+	//   alicloud_qr —— OAuth2 扫码(普通第三方应用，**阿里会限速**)
+	//   alicloud_tv —— TV 版客户端(实测原画速度约快 5 倍)
+	GetTokenExtra(provider string) string
 	SaveToken(provider, token string) error
 }
 

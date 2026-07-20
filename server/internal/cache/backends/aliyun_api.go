@@ -194,8 +194,14 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		}
 	} else {
 		// 在线 token 服务：GET ?refresh_ui=<rt>&server_use=true&driver_txt=alicloud_qr
-		u := fmt.Sprintf("%s?refresh_ui=%s&server_use=true&driver_txt=alicloud_qr",
-			a.openRenewURL, url.QueryEscape(rt))
+		driverTxt := "alicloud_qr"
+		if a.tokens != nil {
+			if e := a.tokens.GetTokenExtra("aliyun_open"); e != "" {
+				driverTxt = e
+			}
+		}
+		u := fmt.Sprintf("%s?refresh_ui=%s&server_use=true&driver_txt=%s",
+			a.openRenewURL, url.QueryEscape(rt), url.QueryEscape(driverTxt))
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return "", err

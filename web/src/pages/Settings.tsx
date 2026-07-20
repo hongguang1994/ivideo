@@ -14,6 +14,7 @@ export default function Settings() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [openToken, setOpenToken] = useState("");
+  const [openType, setOpenType] = useState("alicloud_tv");
   const [saved, setSaved] = useState("");
   const pollRef = useRef<number | null>(null);
 
@@ -21,7 +22,7 @@ export default function Settings() {
     setError("");
     setSaved("");
     try {
-      await saveProviderToken("aliyun_open", openToken);
+      await saveProviderToken("aliyun_open", openToken, openType);
       setOpenToken("");
       setSaved("✅ 已保存,原画直链可用了");
       loadProviders();
@@ -94,11 +95,13 @@ export default function Settings() {
       {saved && <p style={{ color: "#4ade80" }}>{saved}</p>}
 
       <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
-        「开放接口」用于取<b>原画直链</b>(给 Emby/Jellyfin 播放,画质最好)。取 token:打开{" "}
+        「开放接口」用于取<b>原画直链</b>。实测阿里<b>按应用限速</b>:TV版约 2.4MB/s,普通 OAuth2 约 0.48MB/s
+        ——所以<b>推荐选 TV版扫码</b>。取 token:打开{" "}
         <a href="https://api.oplist.org" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
           api.oplist.org
         </a>{" "}
-        → 选「AliYun Drive App Login」→ 扫码 → 复制 <b>Refresh Token</b> 粘到下面。
+        → 选「<b>阿里云盘 (Client) TV版扫码</b>」→ 勾上「使用 OpenList 提供的参数」→ 获取 Token → 扫码 →
+        复制 <b>Refresh Token</b> 粘到下面(类型选 TV版)。
       </p>
 
       <div className="provider-list">
@@ -122,6 +125,15 @@ export default function Settings() {
             )}
             {p.authMethod === "token" && (
               <div style={{ display: "flex", gap: 8, flex: "1 1 340px", justifyContent: "flex-end" }}>
+                <select
+                  className="token-input"
+                  style={{ flex: "0 0 150px" }}
+                  value={openType}
+                  onChange={(e) => setOpenType(e.target.value)}
+                >
+                  <option value="alicloud_tv">TV版扫码(不限速)</option>
+                  <option value="alicloud_qr">OAuth2扫码(限速)</option>
+                </select>
                 <input
                   className="token-input"
                   placeholder="粘贴开放接口 refresh token"

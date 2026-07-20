@@ -97,6 +97,14 @@ func (t tokenStore) GetToken(provider string) string {
 	return cr.Token
 }
 
+func (t tokenStore) GetTokenExtra(provider string) string {
+	cr, _, err := t.st.GetCredential(provider)
+	if err != nil {
+		return ""
+	}
+	return cr.Extra
+}
+
 func (t tokenStore) SaveToken(provider, token string) error {
 	return t.st.SetCredentialToken(provider, token)
 }
