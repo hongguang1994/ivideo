@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,10 +20,35 @@ func (h *Handler) Providers(c *gin.Context) {
 	// 固定列出支持的网盘,标注是否已授权。
 	out := []gin.H{
 		{"provider": "aliyun", "name": "阿里云盘", "authMethod": "qrcode", "authorized": m["aliyun"]},
+		{"provider": "aliyun_open", "name": "阿里云盘 · 开放接口(原画直链)", "authMethod": "token", "authorized": m["aliyun_open"]},
 		{"provider": "115", "name": "115网盘", "authMethod": "cookie", "authorized": m["115"]},
 		{"provider": "quark", "name": "夸克网盘", "authMethod": "cookie", "authorized": m["quark"]},
 	}
 	c.JSON(http.StatusOK, gin.H{"providers": out})
+}
+
+// SaveToken 保存某网盘的凭据(目前用于阿里开放接口 refresh token / 将来 115、夸克 cookie)。
+// POST /api/settings/token  body: {provider, token}
+func (h *Handler) SaveToken(c *gin.Context) {
+	var req struct {
+		Provider string `json:"provider"`
+		Token    string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Provider == "" || req.Token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 provider / token"})
+		return
+	}
+	switch req.Provider {
+	case "aliyun_open", "115", "quark":
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 provider: " + req.Provider})
+		return
+	}
+	if err := h.store.SetCredentialToken(req.Provider, strings.TrimSpace(req.Token)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // AliyunQR 申请阿里云盘登录二维码。

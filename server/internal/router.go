@@ -69,8 +69,13 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 
 		// 设置 / 网盘授权
 		api.GET("/settings/providers", h.Providers)
+		api.POST("/settings/token", h.SaveToken)
 		api.POST("/auth/aliyun/qr", h.AliyunQR)
 		api.POST("/auth/aliyun/qr/status", h.AliyunQRStatus)
+
+		// Emby/Jellyfin(strm) 伪文件入口 → 302 原画直链;HEAD 不触发转存
+		api.GET("/file/:name", h.FileGateway)
+		api.HEAD("/file/:name", h.FileGateway)
 	}
 
 	return r, nil

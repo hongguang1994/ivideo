@@ -32,21 +32,35 @@ type Aliyun struct {
 	driveID      string
 	tokens       TokenStore // 可为 nil
 
+	// 开放接口(取原画直链)
+	openRT           string
+	openClientID     string
+	openClientSecret string
+	openTokenURL     string
+	openRenewURL     string
+
 	http *http.Client
 
 	mu        sync.Mutex
 	accessTok string
 	accessExp time.Time
+	openTok   string
+	openExp   time.Time
 }
 
 // NewAliyun 从配置创建阿里云盘适配器；tokens 用于读写扫码后的持久化 token。
 func NewAliyun(cfg config.Config, tokens TokenStore) *Aliyun {
 	return &Aliyun{
-		webRT:        cfg.AliyunRefreshToken,
-		tempFolderID: cfg.AliyunTempFolderID,
-		driveID:      cfg.AliyunDriveID,
-		tokens:       tokens,
-		http:         &http.Client{Timeout: 30 * time.Second},
+		webRT:            cfg.AliyunRefreshToken,
+		tempFolderID:     cfg.AliyunTempFolderID,
+		driveID:          cfg.AliyunDriveID,
+		tokens:           tokens,
+		openRT:           cfg.AliyunOpenRefreshToken,
+		openClientID:     cfg.AliyunOpenClientID,
+		openClientSecret: cfg.AliyunOpenClientSecret,
+		openTokenURL:     cfg.AliyunOpenTokenURL,
+		openRenewURL:     cfg.AliyunOpenRenewURL,
+		http:             &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -84,6 +98,19 @@ func (a *Aliyun) DirectURL(ctx context.Context, cachePath string) (string, error
 		return "", err
 	}
 	return a.playURL(ctx, accessTok, cachePath)
+}
+
+// OriginalURL 用开放接口取「原画直链」(mkv/mp4 本体,支持 Range)。
+// 供 Emby/Jellyfin(strm) 使用；浏览器仍用 DirectURL 的转码 HLS。
+func (a *Aliyun) OriginalURL(ctx context.Context, cachePath string) (string, error) {
+	if _, err := a.webToken(ctx); err != nil { // 确保 driveID 就绪
+		return "", err
+	}
+	openTok, err := a.openAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	return a.originalURL(ctx, openTok, cachePath)
 }
 
 // Delete 删除已转存文件（进回收站）。

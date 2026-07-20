@@ -66,6 +66,28 @@ func (m *Manager) StreamURL(resourceID int64) (string, error) {
 	return m.backend.DirectURL(context.Background(), item.CachePath)
 }
 
+// OriginalURL 取「原画直链」(供 Emby/Jellyfin 的 strm 使用)。
+// 适配器需实现 OriginalURLProvider，否则回退到 DirectURL。
+func (m *Manager) OriginalURL(resourceID int64) (string, error) {
+	item, err := m.EnsureReady(resourceID)
+	if err != nil {
+		return "", err
+	}
+	if item.Status != store.StatusReady || item.CachePath == "" {
+		return "", fmt.Errorf("资源尚未就绪（%s）", item.Status)
+	}
+	if p, ok := m.backend.(OriginalURLProvider); ok {
+		return p.OriginalURL(context.Background(), item.CachePath)
+	}
+	return m.backend.DirectURL(context.Background(), item.CachePath)
+}
+
+// Status 只读查询缓存状态，**不会触发转存**。
+// 用于 HEAD 探测等场景，避免 Emby/Jellyfin 扫描媒体库时把所有资源都转存一遍。
+func (m *Manager) Status(resourceID int64) (store.CacheItem, error) {
+	return m.store.GetCacheItem(resourceID)
+}
+
 // startTransfer 非阻塞触发一次转存，同一资源并发只跑一个。
 func (m *Manager) startTransfer(res store.Resource) {
 	m.mu.Lock()

@@ -83,8 +83,18 @@ export async function playResource(id: number): Promise<PlayResp> {
 export interface Provider {
   provider: string;
   name: string;
-  authMethod: "qrcode" | "cookie";
+  authMethod: "qrcode" | "cookie" | "token";
   authorized: boolean;
+}
+
+// 保存某网盘凭据(阿里开放接口 refresh token / 115、夸克 cookie)。
+export async function saveProviderToken(provider: string, token: string): Promise<void> {
+  const res = await fetch("/api/settings/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, token }),
+  });
+  if (!res.ok) throw new Error((await res.json()).error || `保存失败: ${res.status}`);
 }
 
 export async function getProviders(): Promise<Provider[]> {

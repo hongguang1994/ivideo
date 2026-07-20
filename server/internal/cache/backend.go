@@ -40,3 +40,10 @@ type CacheBackend interface {
 	// Quota 返回已用 / 总量（字节）。未知可返回 (0, 0, nil)。
 	Quota(ctx context.Context) (used, total int64, err error)
 }
+
+// OriginalURLProvider 是可选能力：能给「原画直链」的适配器实现它。
+// 用于 Emby/Jellyfin(strm) 这类能直接吃原始文件的客户端；
+// 浏览器则走 DirectURL（转码 HLS），因为浏览器放不了 mkv。
+type OriginalURLProvider interface {
+	OriginalURL(ctx context.Context, cachePath string) (string, error)
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -20,6 +21,9 @@ const (
 	aliVideoPreviewURL = "https://api.alipan.com/v2/file/get_video_preview_play_info" // 转码 HLS 播放地址
 	aliDeleteURL       = "https://api.alipan.com/v3/file/delete"                       // 删除(进回收站)
 	aliClearTrashURL = "https://api.alipan.com/v2/recyclebin/clear"          // 清空回收站
+
+	// 开放接口(取原画直链)
+	aliOpenDownloadURL = "https://openapi.alipan.com/adrive/v1.0/openFile/getDownloadUrl"
 )
 
 // doJSON 发一个 JSON 请求并把响应解到 out；非 2xx 返回带响应体的错误。
@@ -145,6 +149,105 @@ func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
 	a.driveID = d
 	a.mu.Unlock()
 	return nil
+}
+
+// ---- 开放接口(取原画直链)----
+
+// openAccessToken 取开放接口 access token。
+// 默认走在线 token 服务(OpenList 的 api.oplist.org);若配置了自己的 client_id/secret 则走官方端点。
+func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
+	a.mu.Lock()
+	if a.openTok != "" && time.Now().Before(a.openExp) {
+		tok := a.openTok
+		a.mu.Unlock()
+		return tok, nil
+	}
+	a.mu.Unlock()
+
+	rt := a.openRT
+	if a.tokens != nil {
+		if t := a.tokens.GetToken("aliyun_open"); t != "" {
+			rt = t
+		}
+	}
+	if rt == "" {
+		return "", fmt.Errorf("未配置开放接口授权，请先在设置页填入开放接口 refresh token")
+	}
+
+	var out struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		Text         string `json:"text"`
+	}
+
+	if a.openClientID != "" {
+		// 自己的开放平台应用：走官方端点
+		body := map[string]string{
+			"client_id":     a.openClientID,
+			"client_secret": a.openClientSecret,
+			"grant_type":    "refresh_token",
+			"refresh_token": rt,
+		}
+		if err := a.doJSON(ctx, a.openTokenURL, nil, body, &out); err != nil {
+			return "", fmt.Errorf("开放接口换 token 失败: %w", err)
+		}
+	} else {
+		// 在线 token 服务：GET ?refresh_ui=<rt>&server_use=true&driver_txt=alicloud_qr
+		u := fmt.Sprintf("%s?refresh_ui=%s&server_use=true&driver_txt=alicloud_qr",
+			a.openRenewURL, url.QueryEscape(rt))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := a.http.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("在线 token 服务请求失败: %w", err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", fmt.Errorf("在线 token 服务响应解析失败: %w (%s)", err, truncateBody(raw))
+		}
+	}
+
+	if out.AccessToken == "" {
+		return "", fmt.Errorf("未取到开放接口 access_token: %s", out.Text)
+	}
+
+	a.mu.Lock()
+	a.openTok = out.AccessToken
+	exp := out.ExpiresIn
+	if exp <= 0 {
+		exp = 7200
+	}
+	a.openExp = time.Now().Add(time.Duration(max(exp-60, 60)) * time.Second)
+	a.mu.Unlock()
+
+	// 开放接口的 refresh token 同样会轮换，回写。
+	if out.RefreshToken != "" && out.RefreshToken != rt {
+		a.openRT = out.RefreshToken
+		if a.tokens != nil {
+			_ = a.tokens.SaveToken("aliyun_open", out.RefreshToken)
+		}
+	}
+	return out.AccessToken, nil
+}
+
+// originalURL 用开放接口取「原画直链」(mkv/mp4 本体，支持 Range)。
+func (a *Aliyun) originalURL(ctx context.Context, openTok, fileID string) (string, error) {
+	headers := map[string]string{"Authorization": "Bearer " + openTok}
+	body := map[string]any{"drive_id": a.driveID, "file_id": fileID, "expire_sec": 14400}
+	var out struct {
+		URL string `json:"url"`
+	}
+	if err := a.doJSON(ctx, aliOpenDownloadURL, headers, body, &out); err != nil {
+		return "", err
+	}
+	if out.URL == "" {
+		return "", fmt.Errorf("开放接口未返回原画直链")
+	}
+	return out.URL, nil
 }
 
 // shareToken 取某分享的访问 token。

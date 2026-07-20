@@ -31,7 +31,8 @@ type Config struct {
 	AliyunOpenRefreshToken string // 开放接口 refresh token（小雅的 myopentoken.txt），用于取直链
 	AliyunOpenClientID     string // 开放平台应用 client_id
 	AliyunOpenClientSecret string // 开放平台应用 client_secret
-	AliyunOpenTokenURL     string // 开放接口换 token 的地址
+	AliyunOpenTokenURL     string // 官方开放接口换 token 地址(填了自己的 client 时用)
+	AliyunOpenRenewURL     string // 在线 token 服务(默认 OpenList 的 api.oplist.org)
 	AliyunTempFolderID     string // 转存目标临时目录的 file_id（小雅的 temp_transfer_folder_id）
 	AliyunDriveID          string // 自己盘 drive_id，留空则从 web token 自动获取
 
@@ -67,6 +68,7 @@ func Load() Config {
 		AliyunOpenClientID:     env("ALIYUN_OPEN_CLIENT_ID", ""),
 		AliyunOpenClientSecret: env("ALIYUN_OPEN_CLIENT_SECRET", ""),
 		AliyunOpenTokenURL:     env("ALIYUN_OPEN_TOKEN_URL", "https://openapi.alipan.com/oauth/access_token"),
+		AliyunOpenRenewURL:     env("ALIYUN_OPEN_RENEW_URL", "https://api.oplist.org/alicloud/renewapi"),
 		AliyunTempFolderID:     env("ALIYUN_TEMP_FOLDER_ID", "root"),
 		AliyunDriveID:          env("ALIYUN_DRIVE_ID", ""),
 

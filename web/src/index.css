@@ -200,3 +200,14 @@ a {
   text-align: center;
   color: #111;
 }
+
+.token-input {
+  flex: 1 1 220px;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}

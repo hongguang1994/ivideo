@@ -4,6 +4,7 @@ import {
   aliyunQR,
   aliyunQRStatus,
   getProviders,
+  saveProviderToken,
   type Provider,
 } from "../api";
 
@@ -12,7 +13,22 @@ export default function Settings() {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [openToken, setOpenToken] = useState("");
+  const [saved, setSaved] = useState("");
   const pollRef = useRef<number | null>(null);
+
+  const saveOpenToken = async () => {
+    setError("");
+    setSaved("");
+    try {
+      await saveProviderToken("aliyun_open", openToken);
+      setOpenToken("");
+      setSaved("✅ 已保存,原画直链可用了");
+      loadProviders();
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    }
+  };
 
   const loadProviders = () => {
     getProviders()
@@ -75,6 +91,15 @@ export default function Settings() {
     <div>
       <h2>设置 · 网盘授权</h2>
       {error && <p style={{ color: "#f87171" }}>出错了: {error}</p>}
+      {saved && <p style={{ color: "#4ade80" }}>{saved}</p>}
+
+      <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+        「开放接口」用于取<b>原画直链</b>(给 Emby/Jellyfin 播放,画质最好)。取 token:打开{" "}
+        <a href="https://api.oplist.org" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+          api.oplist.org
+        </a>{" "}
+        → 选「AliYun Drive App Login」→ 扫码 → 复制 <b>Refresh Token</b> 粘到下面。
+      </p>
 
       <div className="provider-list">
         {providers.map((p) => (
@@ -94,6 +119,19 @@ export default function Settings() {
               <button className="tab" onClick={startAliyunQR}>
                 {p.authorized ? "重新授权" : "扫码授权"}
               </button>
+            )}
+            {p.authMethod === "token" && (
+              <div style={{ display: "flex", gap: 8, flex: "1 1 340px", justifyContent: "flex-end" }}>
+                <input
+                  className="token-input"
+                  placeholder="粘贴开放接口 refresh token"
+                  value={openToken}
+                  onChange={(e) => setOpenToken(e.target.value)}
+                />
+                <button className="tab active" onClick={saveOpenToken} disabled={!openToken.trim()}>
+                  保存
+                </button>
+              </div>
             )}
             {p.authMethod === "cookie" && (
               <span className="muted" style={{ fontSize: 13 }}>
