@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/url"
@@ -23,6 +24,31 @@ func hlsHostAllowed(host string) bool {
 	return false
 }
 
+// encodeUpstream 把上游地址编码进路径。
+// 用 base64url(字符集只有 A-Za-z0-9-_，不含点)，这样整个 URL 里
+// **唯一的点就是结尾的扩展名** —— ffmpeg 的 HLS allowed_extensions 检查靠
+// “最后一个点之后的内容”判断扩展名，查询串里带点会让它认不出而拒绝打开切片。
+func encodeUpstream(raw string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeUpstream 从 "<base64url>.ext" 还原上游地址。
+func decodeUpstream(name string) (string, bool) {
+	if i := strings.LastIndex(name, "."); i > 0 {
+		name = name[:i]
+	}
+	b, err := base64.RawURLEncoding.DecodeString(name)
+	if err != nil {
+		return "", false
+	}
+	raw := string(b)
+	u, err := url.Parse(raw)
+	if err != nil || !hlsHostAllowed(u.Host) {
+		return "", false
+	}
+	return raw, true
+}
+
 // HLSPlaylistFile 是带 .m3u8 后缀的入口,供 strm / 播放器按扩展名识别。
 // GET /api/hls/<资源ID>.m3u8
 func (h *Handler) HLSPlaylistFile(c *gin.Context) {
@@ -39,7 +65,18 @@ func (h *Handler) HLSPlaylistFile(c *gin.Context) {
 	h.servePlaylist(c, id)
 }
 
-// HLSPlaylist 代理并改写 m3u8。
+// HLSSubPlaylist 处理被改写过的子播放列表。
+// GET /api/hlsp/<base64url>.m3u8
+func (h *Handler) HLSSubPlaylist(c *gin.Context) {
+	raw, ok := decodeUpstream(c.Param("name"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的子播放列表地址"})
+		return
+	}
+	h.renderPlaylist(c, raw)
+}
+
+// HLSPlaylist 兼容旧的查询参数入口。
 // GET /api/hls?resource=<id>   或   GET /api/hls?url=<绝对 m3u8 地址>
 func (h *Handler) HLSPlaylist(c *gin.Context) {
 	if raw := c.Query("url"); raw != "" {
@@ -64,7 +101,7 @@ func (h *Handler) servePlaylist(c *gin.Context, id int64) {
 	h.renderPlaylist(c, u)
 }
 
-// renderPlaylist 拉取上游 m3u8,把其中的地址改写成走本站同源代理,规避阿里 CDN 跨域。
+// renderPlaylist 拉取上游 m3u8,把其中的地址改写成走本站同源代理。
 func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 	base, err := url.Parse(m3u8URL)
 	if err != nil || !hlsHostAllowed(base.Host) {
@@ -95,10 +132,11 @@ func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 			continue
 		}
 		abs := base.ResolveReference(ref).String()
+		enc := encodeUpstream(abs)
 		if strings.Contains(strings.ToLower(abs), ".m3u8") {
-			b.WriteString("/api/hls?url=" + url.QueryEscape(abs)) // 子播放列表再改写
+			b.WriteString("/api/hlsp/" + enc + ".m3u8") // 子播放列表继续改写
 		} else {
-			b.WriteString("/api/hls-seg?u=" + url.QueryEscape(abs)) // 切片走代理
+			b.WriteString("/api/hls-seg/" + enc + ".ts") // 切片走代理，扩展名明确
 		}
 		b.WriteByte('\n')
 	}
@@ -107,7 +145,18 @@ func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 	c.String(http.StatusOK, b.String())
 }
 
-// HLSSegment 代理单个切片(或子资源)。
+// HLSSegmentFile 代理单个切片。
+// GET /api/hls-seg/<base64url>.ts
+func (h *Handler) HLSSegmentFile(c *gin.Context) {
+	raw, ok := decodeUpstream(c.Param("name"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法切片地址"})
+		return
+	}
+	h.proxyStream(c, raw)
+}
+
+// HLSSegment 兼容旧的查询参数入口。
 // GET /api/hls-seg?u=<绝对地址>
 func (h *Handler) HLSSegment(c *gin.Context) {
 	raw := c.Query("u")
@@ -116,5 +165,5 @@ func (h *Handler) HLSSegment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法切片地址"})
 		return
 	}
-	h.proxyStream(c, raw) // 复用带 Range 透传的代理
+	h.proxyStream(c, raw)
 }

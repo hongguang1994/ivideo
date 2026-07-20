@@ -66,7 +66,9 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 		// HLS 同源代理（转码 m3u8 + 切片）
 		api.GET("/hls", h.HLSPlaylist)
 		api.GET("/hls/:name", h.HLSPlaylistFile)
+		api.GET("/hlsp/:name", h.HLSSubPlaylist)
 		api.GET("/hls-seg", h.HLSSegment)
+		api.GET("/hls-seg/:name", h.HLSSegmentFile)
 
 		// 设置 / 网盘授权
 		api.GET("/settings/providers", h.Providers)
