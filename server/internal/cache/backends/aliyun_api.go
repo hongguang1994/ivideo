@@ -394,6 +394,25 @@ func (a *Aliyun) copyFromShare(ctx context.Context, accessTok, shareID, shareTok
 	return "", fmt.Errorf("转存返回异步任务(async_task_id=%s)，该文件非秒传，首版暂未支持轮询", out.AsyncTaskID)
 }
 
+// templateRank 给转码档位排序，数值越大画质越高。未知档位排在最低(0)。
+func templateRank(id string) int {
+	switch strings.ToUpper(id) {
+	case "4K", "UHD":
+		return 5
+	case "QHD":
+		return 4
+	case "FHD":
+		return 3
+	case "HD":
+		return 2
+	case "SD":
+		return 1
+	case "LD":
+		return 0
+	}
+	return 0
+}
+
 // playURL 取自己盘视频文件的转码 HLS 播放地址(m3u8)。
 // 阿里对视频不放原画直链(get_download_url 返回空),转码 HLS 才可用。
 func (a *Aliyun) playURL(ctx context.Context, accessTok, fileID string) (string, error) {
@@ -416,22 +435,22 @@ func (a *Aliyun) playURL(ctx context.Context, accessTok, fileID string) (string,
 	if err := a.doJSON(ctx, aliVideoPreviewURL, headers, body, &out); err != nil {
 		return "", err
 	}
-	// 优先高清(HD > SD),取已完成且有 url 的清晰度。
+	// 取【画质最高】且已完成的档位。阿里按源分辨率提供:
+	// 4K > QHD(2K) > FHD(1080p) > HD(720p) > SD(480p) > LD(360p)
 	tasks := out.VideoPreviewPlayInfo.LiveTranscodingTaskList
-	best := ""
+	bestURL, bestRank := "", -1
 	for _, t := range tasks {
 		if t.Status != "finished" || t.URL == "" {
 			continue
 		}
-		if t.TemplateID == "HD" {
-			return t.URL, nil
+		if r := templateRank(t.TemplateID); r > bestRank {
+			bestURL, bestRank = t.URL, r
 		}
-		best = t.URL
 	}
-	if best == "" {
+	if bestURL == "" {
 		return "", fmt.Errorf("未取到可播的转码地址(转码可能未就绪)")
 	}
-	return best, nil
+	return bestURL, nil
 }
 
 // deleteFile 删除自己盘文件（进回收站）。
