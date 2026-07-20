@@ -91,6 +91,15 @@ func (m *Manager) ListShare(share ShareRef, subPath string) ([]ShareEntry, error
 	return p.ListShare(context.Background(), share, subPath)
 }
 
+// SaveShare 把分享内某路径手动转存到自己盘指定目录(适配器需实现 ShareSaver)。
+func (m *Manager) SaveShare(share ShareRef, srcPath, targetFolder string) error {
+	p, ok := m.backend.(ShareSaver)
+	if !ok {
+		return fmt.Errorf("当前缓存盘适配器(%s)不支持手动转存", m.backend.Name())
+	}
+	return p.SaveToFolder(context.Background(), share, srcPath, targetFolder)
+}
+
 // IsHLS 表示当前适配器的播放地址是否为 HLS。
 func (m *Manager) IsHLS() bool {
 	if p, ok := m.backend.(HLSStreamer); ok {

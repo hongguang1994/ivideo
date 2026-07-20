@@ -61,6 +61,7 @@ func NewRouter(cfg config.Config, st *store.Store) (*gin.Engine, error) {
 		api.POST("/resources", h.AddResource)
 		api.POST("/resources/import", h.ImportShare)
 		api.GET("/share/browse", h.BrowseShare)
+		api.POST("/share/save", h.SaveShareItem)
 		api.GET("/play", h.Play)
 
 		// 统一播放代理（source=openlist|jellyfin|cache）

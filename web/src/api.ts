@@ -88,6 +88,22 @@ export async function browseShare(
   return (await res.json()).items || [];
 }
 
+// 手动转存分享内某文件/文件夹到自己阿里盘的指定目录(默认 ivideo,永久留存)。
+export async function saveShareItem(args: {
+  shareUrl: string;
+  sharePwd?: string;
+  path: string;
+  targetFolder?: string;
+  provider?: string;
+}): Promise<void> {
+  const res = await fetch("/api/share/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) throw new Error((await res.json()).error || `转存失败: ${res.status}`);
+}
+
 export interface PlayResp {
   status: "uncached" | "transferring" | "ready" | "failed" | "cleaned";
   streamUrl?: string;

@@ -54,6 +54,12 @@ type ShareLister interface {
 	ListShare(ctx context.Context, share ShareRef, subPath string) ([]ShareEntry, error)
 }
 
+// ShareSaver 是可选能力：把分享内某路径「手动转存」到自己盘的指定目录。
+// 这条独立于按需转存缓存 —— 存进去的文件是永久留存，不受清理任务影响。
+type ShareSaver interface {
+	SaveToFolder(ctx context.Context, share ShareRef, srcPath, targetFolder string) error
+}
+
 // HLSStreamer 表示该适配器的 DirectURL 返回的是 HLS 播放列表(m3u8)。
 // 不能靠 URL 里有没有 ".m3u8" 判断 —— 阿里 FHD/HD 档的地址路径里并不带该后缀。
 type HLSStreamer interface {

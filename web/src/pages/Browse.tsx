@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { browseShare, type ShareEntry } from "../api";
+import { browseShare, saveShareItem, type ShareEntry } from "../api";
 
 // 格式化文件大小
 function humanSize(n: number): string {
@@ -22,6 +22,27 @@ export default function Browse() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [opened, setOpened] = useState(false);
+  const [targetFolder, setTargetFolder] = useState("ivideo"); // 转存目标目录
+  const [saving, setSaving] = useState(""); // 正在转存的条目 path
+  const [saved, setSaved] = useState<Record<string, string>>({}); // path -> 状态文案
+
+  const save = async (e: ShareEntry) => {
+    setSaving(e.path);
+    setSaved((s) => ({ ...s, [e.path]: "" }));
+    try {
+      await saveShareItem({
+        shareUrl: shareUrl.trim(),
+        sharePwd: sharePwd.trim(),
+        path: e.path,
+        targetFolder: targetFolder.trim() || "ivideo",
+      });
+      setSaved((s) => ({ ...s, [e.path]: "✅ 已转存" }));
+    } catch (err) {
+      setSaved((s) => ({ ...s, [e.path]: "❌ " + String((err as Error).message || err) }));
+    } finally {
+      setSaving("");
+    }
+  };
 
   const list = async (p: string) => {
     if (!shareUrl.trim()) {
@@ -76,28 +97,59 @@ export default function Browse() {
 
       {opened && (
         <>
-          <div className="breadcrumb">
-            当前目录: {path || "/"}{" "}
-            {path && (
-              <a onClick={goUp} style={{ cursor: "pointer", color: "var(--accent)" }}>
-                ⬆ 返回上级
-              </a>
-            )}
+          <div className="breadcrumb" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span>
+              当前目录: {path || "/"}{" "}
+              {path && (
+                <a onClick={goUp} style={{ cursor: "pointer", color: "var(--accent)" }}>
+                  ⬆ 返回上级
+                </a>
+              )}
+            </span>
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+              转存到我的阿里盘:
+              <input
+                value={targetFolder}
+                onChange={(e) => setTargetFolder(e.target.value)}
+                className="token-input"
+                style={{ flex: "0 0 160px" }}
+                placeholder="ivideo"
+              />
+            </span>
           </div>
           {items.length === 0 && !loading && <p className="muted">这个目录是空的。</p>}
           <div className="browse-list">
             {items.map((it) => (
-              <div
-                key={it.path}
-                className="browse-row"
-                onClick={() => it.isDir && list(it.path)}
-                style={{ cursor: it.isDir ? "pointer" : "default" }}
-              >
-                <span className="browse-icon">{it.isDir ? "📁" : "🎬"}</span>
-                <span className="browse-name">{it.name}</span>
+              <div key={it.path} className="browse-row">
+                <span
+                  className="browse-icon"
+                  onClick={() => it.isDir && list(it.path)}
+                  style={{ cursor: it.isDir ? "pointer" : "default" }}
+                >
+                  {it.isDir ? "📁" : "🎬"}
+                </span>
+                <span
+                  className="browse-name"
+                  onClick={() => it.isDir && list(it.path)}
+                  style={{ cursor: it.isDir ? "pointer" : "default" }}
+                >
+                  {it.name}
+                </span>
                 <span className="muted browse-size">
                   {it.isDir ? "目录" : humanSize(it.size)}
                 </span>
+                {saved[it.path] ? (
+                  <span className="browse-size" style={{ fontSize: 12 }}>{saved[it.path]}</span>
+                ) : (
+                  <button
+                    className="tab"
+                    style={{ padding: "3px 10px", fontSize: 12 }}
+                    disabled={saving === it.path}
+                    onClick={() => save(it)}
+                  >
+                    {saving === it.path ? "转存中…" : "转存"}
+                  </button>
+                )}
               </div>
             ))}
           </div>

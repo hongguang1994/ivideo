@@ -37,6 +37,39 @@ func (h *Handler) BrowseShare(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": entries})
 }
 
+// SaveShareItem 把分享内某个文件/文件夹手动转存到自己盘指定目录(默认 ivideo)。
+// POST /api/share/save
+// body: {shareUrl, sharePwd?, path, targetFolder?, provider?}
+func (h *Handler) SaveShareItem(c *gin.Context) {
+	var req struct {
+		ShareURL     string `json:"shareUrl"`
+		SharePwd     string `json:"sharePwd"`
+		Path         string `json:"path"`
+		TargetFolder string `json:"targetFolder"`
+		Provider     string `json:"provider"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ShareURL == "" || req.Path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 shareUrl 或 path"})
+		return
+	}
+	if req.Provider == "" {
+		req.Provider = "aliyun"
+	}
+	if req.TargetFolder == "" {
+		req.TargetFolder = "ivideo"
+	}
+	err := h.cache.SaveShare(cache.ShareRef{
+		Provider: req.Provider,
+		ShareURL: req.ShareURL,
+		SharePwd: req.SharePwd,
+	}, req.Path, req.TargetFolder)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "targetFolder": req.TargetFolder})
+}
+
 // ImportShare 递归遍历一个分享，为其中每个视频文件建一条资源。
 // POST /api/resources/import
 // body: {shareUrl, sharePwd?, path?, provider?}

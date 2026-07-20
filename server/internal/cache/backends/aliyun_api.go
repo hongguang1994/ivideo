@@ -15,13 +15,14 @@ import (
 
 // 阿里云盘 web 接口地址（纯 web 单套，配合扫码拿到的 refresh_token）。
 const (
-	aliWebTokenURL   = "https://auth.alipan.com/v2/account/token"             // web refresh → access token
-	aliShareTokenURL = "https://api.alipan.com/v2/share_link/get_share_token" // 分享 token
-	aliShareListURL  = "https://api.alipan.com/adrive/v3/file/list"           // 列分享内文件
-	aliCopyURL         = "https://api.alipan.com/adrive/v2/file/copy"                  // 转存(分享→自己盘)
+	aliWebTokenURL     = "https://auth.alipan.com/v2/account/token"                   // web refresh → access token
+	aliShareTokenURL   = "https://api.alipan.com/v2/share_link/get_share_token"       // 分享 token
+	aliShareListURL    = "https://api.alipan.com/adrive/v3/file/list"                 // 列分享内文件
+	aliCopyURL         = "https://api.alipan.com/adrive/v2/file/copy"                 // 转存(分享→自己盘)
 	aliVideoPreviewURL = "https://api.alipan.com/v2/file/get_video_preview_play_info" // 转码 HLS 播放地址
-	aliDeleteURL       = "https://api.alipan.com/v3/file/delete"                       // 删除(进回收站)
-	aliClearTrashURL = "https://api.alipan.com/v2/recyclebin/clear"          // 清空回收站
+	aliDeleteURL       = "https://api.alipan.com/v3/file/delete"                      // 删除(进回收站)
+	aliClearTrashURL   = "https://api.alipan.com/v2/recyclebin/clear"                 // 清空回收站
+	aliCreateFolderURL = "https://api.alipan.com/adrive/v2/file/createWithFolders"    // 创建文件夹
 
 	// 开放接口(取原画直链)
 	aliOpenDownloadURL = "https://openapi.alipan.com/adrive/v1.0/openFile/getDownloadUrl"
@@ -392,6 +393,63 @@ func (a *Aliyun) copyFromShare(ctx context.Context, accessTok, shareID, shareTok
 		return out.FileID, nil // 秒传/同步完成
 	}
 	return "", fmt.Errorf("转存返回异步任务(async_task_id=%s)，该文件非秒传，首版暂未支持轮询", out.AsyncTaskID)
+}
+
+// ensureFolderPath 在自己盘里按路径逐级创建/定位文件夹(不存在则建),返回最终文件夹 file_id。
+// folderPath 形如 "ivideo" 或 "ivideo/电影"。
+func (a *Aliyun) ensureFolderPath(ctx context.Context, accessTok, folderPath string) (string, error) {
+	headers := map[string]string{"Authorization": "Bearer " + accessTok}
+	parent := "root"
+	for _, seg := range splitPath(folderPath) {
+		body := map[string]any{
+			"drive_id":        a.driveID,
+			"parent_file_id":  parent,
+			"name":            seg,
+			"type":            "folder",
+			"check_name_mode": "refuse", // 已存在则返回现有的,不重复建
+		}
+		var out struct {
+			FileID string `json:"file_id"`
+		}
+		if err := a.doJSON(ctx, aliCreateFolderURL, headers, body, &out); err != nil {
+			return "", err
+		}
+		if out.FileID == "" {
+			return "", fmt.Errorf("创建/定位文件夹失败: %s", seg)
+		}
+		parent = out.FileID
+	}
+	return parent, nil
+}
+
+// copyShareItemTo 把分享内文件(或文件夹)转存到自己盘指定目录,返回新 file_id。
+func (a *Aliyun) copyShareItemTo(ctx context.Context, accessTok, shareID, shareTok, fileID, toParent string) (string, error) {
+	headers := map[string]string{
+		"Authorization": "Bearer " + accessTok,
+		"x-share-token": shareTok,
+	}
+	body := map[string]any{
+		"file_id":           fileID,
+		"share_id":          shareID,
+		"auto_rename":       true,
+		"to_parent_file_id": toParent,
+		"to_drive_id":       a.driveID,
+	}
+	var out struct {
+		FileID      string `json:"file_id"`
+		AsyncTaskID string `json:"async_task_id"`
+	}
+	if err := a.doJSON(ctx, aliCopyURL, headers, body, &out); err != nil {
+		return "", err
+	}
+	if out.FileID != "" {
+		return out.FileID, nil
+	}
+	// 大文件夹/非秒传会返回异步任务;转存动作已提交,后台会继续完成。
+	if out.AsyncTaskID != "" {
+		return "", nil // 视为已提交,无同步 file_id
+	}
+	return "", fmt.Errorf("转存未返回结果")
 }
 
 // templateRank 给转码档位排序，数值越大画质越高。未知档位排在最低(0)。

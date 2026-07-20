@@ -141,6 +141,39 @@ func (a *Aliyun) ListShare(ctx context.Context, share cache.ShareRef, subPath st
 	return out, nil
 }
 
+// SaveToFolder 把分享内 srcPath(文件或文件夹)手动转存到自己盘的 targetFolder(默认 ivideo)。
+// 永久留存,独立于按需转存缓存,不会被清理任务删除。
+func (a *Aliyun) SaveToFolder(ctx context.Context, share cache.ShareRef, srcPath, targetFolder string) error {
+	if strings.TrimSpace(srcPath) == "" {
+		return fmt.Errorf("未指定要转存的文件路径")
+	}
+	if strings.TrimSpace(targetFolder) == "" {
+		targetFolder = "ivideo"
+	}
+	shareID := parseAliShareID(share.ShareURL)
+	if shareID == "" {
+		return fmt.Errorf("无法解析 share_id: %s", share.ShareURL)
+	}
+	accessTok, err := a.webToken(ctx) // 同时确保 driveID 就绪
+	if err != nil {
+		return err
+	}
+	shareTok, err := a.shareToken(ctx, shareID, share.SharePwd)
+	if err != nil {
+		return err
+	}
+	fileID, _, err := a.resolveFileID(ctx, shareID, shareTok, srcPath)
+	if err != nil {
+		return err
+	}
+	targetID, err := a.ensureFolderPath(ctx, accessTok, targetFolder)
+	if err != nil {
+		return err
+	}
+	_, err = a.copyShareItemTo(ctx, accessTok, shareID, shareTok, fileID, targetID)
+	return err
+}
+
 // IsHLS 阿里的 DirectURL 返回的是转码 HLS 播放列表。
 func (a *Aliyun) IsHLS() bool { return true }
 
