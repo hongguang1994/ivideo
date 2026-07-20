@@ -211,3 +211,37 @@ a {
   color: var(--text);
   font-size: 13px;
 }
+
+.browse-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 820px;
+}
+.browse-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.browse-row:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.browse-icon {
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+.browse-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.browse-size {
+  flex: 0 0 auto;
+  font-size: 12px;
+}

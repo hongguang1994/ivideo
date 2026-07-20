@@ -64,6 +64,30 @@ export async function addResource(r: Partial<Resource>): Promise<Resource> {
   return res.json();
 }
 
+// ---- 分享浏览(只读列目录,不涉及转存/播放)----
+
+export interface ShareEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+}
+
+// 通过分享链接+提取码浏览目录内容(匿名,只读)。
+export async function browseShare(
+  shareUrl: string,
+  sharePwd = "",
+  path = "",
+  provider = "aliyun"
+): Promise<ShareEntry[]> {
+  const params = new URLSearchParams({ shareUrl, provider });
+  if (sharePwd) params.set("sharePwd", sharePwd);
+  if (path) params.set("path", path);
+  const res = await fetch(`/api/share/browse?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || `浏览失败: ${res.status}`);
+  return (await res.json()).items || [];
+}
+
 export interface PlayResp {
   status: "uncached" | "transferring" | "ready" | "failed" | "cleaned";
   streamUrl?: string;
