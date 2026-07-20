@@ -106,6 +106,9 @@ func (a *Aliyun) DirectURL(ctx context.Context, cachePath string) (string, error
 	return a.playURL(ctx, accessTok, cachePath)
 }
 
+// IsHLS 阿里的 DirectURL 返回的是转码 HLS 播放列表。
+func (a *Aliyun) IsHLS() bool { return true }
+
 // OriginalURL 用开放接口取「原画直链」(mkv/mp4 本体,支持 Range)。
 // 供 Emby/Jellyfin(strm) 使用；浏览器仍用 DirectURL 的转码 HLS。
 func (a *Aliyun) OriginalURL(ctx context.Context, cachePath string) (string, error) {

@@ -41,6 +41,12 @@ type CacheBackend interface {
 	Quota(ctx context.Context) (used, total int64, err error)
 }
 
+// HLSStreamer 表示该适配器的 DirectURL 返回的是 HLS 播放列表(m3u8)。
+// 不能靠 URL 里有没有 ".m3u8" 判断 —— 阿里 FHD/HD 档的地址路径里并不带该后缀。
+type HLSStreamer interface {
+	IsHLS() bool
+}
+
 // OriginalURLProvider 是可选能力：能给「原画直链」的适配器实现它。
 // 用于 Emby/Jellyfin(strm) 这类能直接吃原始文件的客户端；
 // 浏览器则走 DirectURL（转码 HLS），因为浏览器放不了 mkv。

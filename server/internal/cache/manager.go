@@ -82,6 +82,14 @@ func (m *Manager) OriginalURL(resourceID int64) (string, error) {
 	return m.backend.DirectURL(context.Background(), item.CachePath)
 }
 
+// IsHLS 表示当前适配器的播放地址是否为 HLS。
+func (m *Manager) IsHLS() bool {
+	if p, ok := m.backend.(HLSStreamer); ok {
+		return p.IsHLS()
+	}
+	return false
+}
+
 // Status 只读查询缓存状态，**不会触发转存**。
 // 用于 HEAD 探测等场景，避免 Emby/Jellyfin 扫描媒体库时把所有资源都转存一遍。
 func (m *Manager) Status(resourceID int64) (store.CacheItem, error) {

@@ -64,7 +64,7 @@ func (h *Handler) Play(c *gin.Context) {
 			resp["message"] = "正在准备播放地址…"
 			break
 		}
-		if strings.Contains(strings.ToLower(url), ".m3u8") {
+		if h.cache.IsHLS() || strings.Contains(strings.ToLower(url), ".m3u8") {
 			resp["type"] = "hls"
 			resp["streamUrl"] = "/api/hls?resource=" + itoa(id) // 代理并改写切片,规避跨域
 		} else {
