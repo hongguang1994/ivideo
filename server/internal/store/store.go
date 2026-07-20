@@ -129,8 +129,8 @@ func (s *Store) CountResources() (int, error) {
 func (s *Store) GetCacheItem(resourceID int64) (CacheItem, error) {
 	var c CacheItem
 	err := s.db.QueryRow(
-		`SELECT resource_id, backend, status, cache_path, direct_url, size, last_access,
-		        COALESCE(error, ''), updated_at
+		`SELECT resource_id, backend, status, COALESCE(cache_path,''), COALESCE(direct_url,''),
+		        size, last_access, COALESCE(error, ''), updated_at
 		 FROM cache_items WHERE resource_id = ?`, resourceID).
 		Scan(&c.ResourceID, &c.Backend, &c.Status, &c.CachePath, &c.DirectURL,
 			&c.Size, &c.LastAccess, &c.Error, &c.UpdatedAt)
@@ -182,8 +182,8 @@ func (s *Store) MarkCleaned(resourceID int64) error {
 // ListReady 返回全部就绪缓存项，按最后访问时间升序（最久未看在前，供 LRU 淘汰）。
 func (s *Store) ListReady() ([]CacheItem, error) {
 	rows, err := s.db.Query(
-		`SELECT resource_id, backend, status, cache_path, direct_url, size, last_access,
-		        COALESCE(error, ''), updated_at
+		`SELECT resource_id, backend, status, COALESCE(cache_path,''), COALESCE(direct_url,''),
+		        size, last_access, COALESCE(error, ''), updated_at
 		 FROM cache_items WHERE status = ? ORDER BY last_access ASC`, StatusReady)
 	if err != nil {
 		return nil, err

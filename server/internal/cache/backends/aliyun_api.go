@@ -99,10 +99,11 @@ func (a *Aliyun) webToken(ctx context.Context) (string, error) {
 	a.accessTok = out.AccessToken
 	a.accessExp = time.Now().Add(time.Duration(max(out.ExpiresIn-60, 60)) * time.Second)
 	if a.driveID == "" {
-		if out.ResourceDriveID != "" {
-			a.driveID = out.ResourceDriveID
-		} else {
+		// 用备份盘(default);ivideo 临时目录也建在备份盘,须一致。
+		if out.DefaultDriveID != "" {
 			a.driveID = out.DefaultDriveID
+		} else {
+			a.driveID = out.ResourceDriveID
 		}
 	}
 	a.mu.Unlock()
