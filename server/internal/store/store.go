@@ -95,11 +95,28 @@ func Open(driver, dsn string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 等数据库就绪：MySQL 容器刚起时可能还没接受连接，重试避免启动即崩溃重启。
+	if err := pingWithRetry(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := execSchema(db, d.schema); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &sqlStore{db: db, d: d}, nil
+}
+
+// pingWithRetry 最多重试 ~60s 等数据库可连（sqlite 通常一次就成）。
+func pingWithRetry(db *sql.DB) error {
+	var err error
+	for i := 0; i < 30; i++ {
+		if err = db.Ping(); err == nil {
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("数据库连接超时: %w", err)
 }
 
 // execSchema 按 ; 拆分逐条执行建表语句（MySQL 驱动默认不允许一次多语句）。
