@@ -28,8 +28,12 @@ type Config struct {
 	//   original —— 原画直链。画质最好，适合开了会员/不限速的账号。
 	StrmMode string
 
+	// ---- 数据库 ----
+	DBDriver string // sqlite(默认) / mysql
+	DBDSN    string // mysql 用:user:pass@tcp(host:3306)/ivideo?charset=utf8mb4
+
 	// ---- 按需转存缓存 ----
-	DBPath             string // SQLite 文件路径
+	DBPath             string // SQLite 文件路径(driver=sqlite 时用)
 	CacheBackend       string // 缓存盘适配器：fake / aliyun / ...
 	CacheDir           string // 自己网盘里存缓存文件的目录
 	CacheMaxBytes      int64  // 缓存总量上限，超过按 LRU 淘汰
@@ -120,6 +124,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("site_url", "http://localhost:8090")
 	v.SetDefault("strm.mode", "hls")
 
+	v.SetDefault("db.driver", "sqlite")
+	v.SetDefault("db.dsn", "")
 	v.SetDefault("db_path", "./ivideo.db")
 	v.SetDefault("cache.backend", "fake")
 	v.SetDefault("cache.dir", "/ivideo-cache")
@@ -170,6 +176,8 @@ func Load(cfgFile string) (Config, error) {
 		SiteURL:  strings.TrimRight(v.GetString("site_url"), "/"),
 		StrmMode: v.GetString("strm.mode"),
 
+		DBDriver:           v.GetString("db.driver"),
+		DBDSN:              v.GetString("db.dsn"),
 		DBPath:             v.GetString("db_path"),
 		CacheBackend:       v.GetString("cache.backend"),
 		CacheDir:           v.GetString("cache.dir"),

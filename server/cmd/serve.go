@@ -24,7 +24,12 @@ func runServer() error {
 	}
 	logging.Setup(cfg.LogLevel, cfg.LogFormat)
 
-	st, err := store.Open(cfg.DBPath)
+	// sqlite 用文件路径,mysql 用 DSN。
+	dsn := cfg.DBPath
+	if cfg.DBDriver == "mysql" {
+		dsn = cfg.DBDSN
+	}
+	st, err := store.Open(cfg.DBDriver, dsn)
 	if err != nil {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}

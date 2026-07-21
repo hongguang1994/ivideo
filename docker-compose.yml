@@ -43,6 +43,22 @@ services:
     # devices:
     #   - /dev/dri:/dev/dri
 
+  # MySQL：可选数据库后端。默认 server 用 SQLite；切到 MySQL 时：
+  #   1) 起本服务：docker compose up -d mysql
+  #   2) server 环境设 DB_DRIVER=mysql、DB_DSN=root:密码@tcp(mysql:3306)/ivideo?charset=utf8mb4
+  # 不切 MySQL 时本服务可以不启动（server 走 SQLite，互不影响）。
+  mysql:
+    image: mysql:8
+    container_name: ivideo-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_DATABASE=ivideo
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-ivideo_root}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    # 仅容器内网访问（server 经 compose 网络连 mysql:3306），不暴露宿主端口
+
   # Go + Gin 后端：聚合 OpenList 与 Jellyfin 两路源，代理视频流。
   server:
     build: ./server
@@ -57,6 +73,9 @@ services:
       # Jellyfin 接入（留空则后端只提供 OpenList 源）
       - JELLYFIN_BASE_URL=${JELLYFIN_BASE_URL:-http://jellyfin:8096}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      # 数据库:默认 sqlite(用 DB_PATH);设 DB_DRIVER=mysql + DB_DSN 即切到 MySQL
+      - DB_DRIVER=${DB_DRIVER:-sqlite}
+      - DB_DSN=${DB_DSN:-}
       # 按需转存缓存
       - DB_PATH=/data/ivideo.db
       - CACHE_BACKEND=${CACHE_BACKEND:-fake}

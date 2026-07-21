@@ -13,7 +13,12 @@ server:
 
 site_url: "http://localhost:8090"   # strm 里写的站点地址
 media_dir: "/media"                 # strm 落地目录
-db_path: "/data/ivideo.db"          # SQLite 文件
+
+# 数据库:driver=sqlite(默认)用 db_path;driver=mysql 用 db.dsn。
+db:
+  driver: "sqlite"                  # sqlite / mysql
+  dsn: ""                           # mysql 专用,如 user:pass@tcp(mysql:3306)/ivideo?charset=utf8mb4
+db_path: "/data/ivideo.db"          # SQLite 文件(driver=sqlite 时用)
 
 strm:
   mode: "hls"                       # hls(转码,流畅) / original(原画,需不限速账号)

@@ -4,10 +4,12 @@ package store
 
 import (
 	"database/sql"
-	_ "embed"
+	"fmt"
+	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，无需 CGO
+	_ "github.com/go-sql-driver/mysql" // MySQL 驱动
+	_ "modernc.org/sqlite"             // 纯 Go SQLite 驱动，无需 CGO
 )
 
 // 缓存项状态。
@@ -18,9 +20,6 @@ const (
 	StatusFailed       = "failed"       // 转存失败
 	StatusCleaned      = "cleaned"      // 已清理释放
 )
-
-//go:embed schema.sql
-var schema string
 
 // Store 是数据层接口。上层（handlers/app/cache/strm）只依赖此接口，
 // 不关心底层是 SQLite 还是 MySQL —— 换库只需新增一个实现。
@@ -49,13 +48,14 @@ type Store interface {
 	ListCredentialProviders() (map[string]bool, error)
 }
 
-// sqliteStore 是 Store 的 SQLite 实现（纯 Go 驱动，无需 CGO）。
-type sqliteStore struct {
+// sqlStore 是 Store 的 database/sql 实现；方言差异(建表 DDL、upsert)由 dialect 收口。
+type sqlStore struct {
 	db *sql.DB
+	d  dialect
 }
 
-// 编译期断言：sqliteStore 必须完整实现 Store 接口。
-var _ Store = (*sqliteStore)(nil)
+// 编译期断言：sqlStore 必须完整实现 Store 接口。
+var _ Store = (*sqlStore)(nil)
 
 // Resource 是一条收集来的分享资源。
 type Resource struct {
@@ -83,26 +83,46 @@ type CacheItem struct {
 	UpdatedAt  int64  `json:"updatedAt"`
 }
 
-// Open 打开（或创建）SQLite 数据库并建表，返回 Store 接口。
-func Open(path string) (Store, error) {
-	db, err := sql.Open("sqlite", path)
+// Open 按驱动(sqlite / mysql)打开数据库并建表，返回 Store 接口。
+//   - sqlite:dsn 为文件路径
+//   - mysql :dsn 为标准 DSN，如 user:pass@tcp(host:3306)/ivideo?charset=utf8mb4
+func Open(driver, dsn string) (Store, error) {
+	d, err := dialectFor(driver)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	db, err := sql.Open(d.driver, dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := execSchema(db, d.schema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &sqliteStore{db: db}, nil
+	return &sqlStore{db: db, d: d}, nil
+}
+
+// execSchema 按 ; 拆分逐条执行建表语句（MySQL 驱动默认不允许一次多语句）。
+func execSchema(db *sql.DB, schema string) error {
+	for _, stmt := range strings.Split(schema, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("建表失败: %w", err)
+		}
+	}
+	return nil
 }
 
 // Close 关闭数据库。
-func (s *sqliteStore) Close() error { return s.db.Close() }
+func (s *sqlStore) Close() error { return s.db.Close() }
 
 // ---- 资源目录 ----
 
 // AddResource 新增一条资源，返回其 ID。
-func (s *sqliteStore) AddResource(r Resource) (int64, error) {
+func (s *sqlStore) AddResource(r Resource) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO resources (title, poster, overview, provider, share_url, share_pwd, file_path, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -115,7 +135,7 @@ func (s *sqliteStore) AddResource(r Resource) (int64, error) {
 }
 
 // ListResources 返回全部资源。
-func (s *sqliteStore) ListResources() ([]Resource, error) {
+func (s *sqlStore) ListResources() ([]Resource, error) {
 	rows, err := s.db.Query(
 		`SELECT id, title, poster, overview, provider, share_url, share_pwd, file_path, created_at
 		 FROM resources ORDER BY created_at DESC`)
@@ -137,7 +157,7 @@ func (s *sqliteStore) ListResources() ([]Resource, error) {
 }
 
 // GetResource 按 ID 取资源。
-func (s *sqliteStore) GetResource(id int64) (Resource, error) {
+func (s *sqlStore) GetResource(id int64) (Resource, error) {
 	var r Resource
 	err := s.db.QueryRow(
 		`SELECT id, title, poster, overview, provider, share_url, share_pwd, file_path, created_at
@@ -148,7 +168,7 @@ func (s *sqliteStore) GetResource(id int64) (Resource, error) {
 }
 
 // CountResources 返回资源条数（用于判断是否需要 seed）。
-func (s *sqliteStore) CountResources() (int, error) {
+func (s *sqlStore) CountResources() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM resources`).Scan(&n)
 	return n, err
@@ -157,7 +177,7 @@ func (s *sqliteStore) CountResources() (int, error) {
 // ---- 缓存项状态机 ----
 
 // GetCacheItem 取缓存项；不存在时返回 status=uncached 的零值。
-func (s *sqliteStore) GetCacheItem(resourceID int64) (CacheItem, error) {
+func (s *sqlStore) GetCacheItem(resourceID int64) (CacheItem, error) {
 	var c CacheItem
 	err := s.db.QueryRow(
 		`SELECT resource_id, backend, status, COALESCE(cache_path,''), COALESCE(direct_url,''),
@@ -172,38 +192,32 @@ func (s *sqliteStore) GetCacheItem(resourceID int64) (CacheItem, error) {
 }
 
 // SetTransferring 标记为转存中。
-func (s *sqliteStore) SetTransferring(resourceID int64, backend string) error {
+func (s *sqlStore) SetTransferring(resourceID int64, backend string) error {
 	return s.upsertStatus(resourceID, backend, StatusTransferring, "")
 }
 
 // SetFailed 标记为失败并记录原因。
-func (s *sqliteStore) SetFailed(resourceID int64, backend, errMsg string) error {
+func (s *sqlStore) SetFailed(resourceID int64, backend, errMsg string) error {
 	return s.upsertStatus(resourceID, backend, StatusFailed, errMsg)
 }
 
 // SetReady 标记为就绪，写入路径/直链/大小，并刷新访问时间。
-func (s *sqliteStore) SetReady(resourceID int64, backend, cachePath, directURL string, size int64) error {
+func (s *sqlStore) SetReady(resourceID int64, backend, cachePath, directURL string, size int64) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(
-		`INSERT INTO cache_items (resource_id, backend, status, cache_path, direct_url, size, last_access, error, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?)
-		 ON CONFLICT(resource_id) DO UPDATE SET
-		    backend=excluded.backend, status=excluded.status, cache_path=excluded.cache_path,
-		    direct_url=excluded.direct_url, size=excluded.size, last_access=excluded.last_access,
-		    error='', updated_at=excluded.updated_at`,
+	_, err := s.db.Exec(s.d.upsertReady,
 		resourceID, backend, StatusReady, cachePath, directURL, size, now, now)
 	return err
 }
 
 // TouchAccess 刷新最后访问时间（LRU 用）。
-func (s *sqliteStore) TouchAccess(resourceID int64) error {
+func (s *sqlStore) TouchAccess(resourceID int64) error {
 	_, err := s.db.Exec(`UPDATE cache_items SET last_access = ? WHERE resource_id = ?`,
 		time.Now().Unix(), resourceID)
 	return err
 }
 
 // MarkCleaned 标记为已清理，清空路径/直链/大小。
-func (s *sqliteStore) MarkCleaned(resourceID int64) error {
+func (s *sqlStore) MarkCleaned(resourceID int64) error {
 	_, err := s.db.Exec(
 		`UPDATE cache_items SET status = ?, cache_path = '', direct_url = '', size = 0, updated_at = ?
 		 WHERE resource_id = ?`, StatusCleaned, time.Now().Unix(), resourceID)
@@ -211,7 +225,7 @@ func (s *sqliteStore) MarkCleaned(resourceID int64) error {
 }
 
 // ListReady 返回全部就绪缓存项，按最后访问时间升序（最久未看在前，供 LRU 淘汰）。
-func (s *sqliteStore) ListReady() ([]CacheItem, error) {
+func (s *sqlStore) ListReady() ([]CacheItem, error) {
 	rows, err := s.db.Query(
 		`SELECT resource_id, backend, status, COALESCE(cache_path,''), COALESCE(direct_url,''),
 		        size, last_access, COALESCE(error, ''), updated_at
@@ -244,7 +258,7 @@ type Credential struct {
 }
 
 // GetCredential 取某网盘凭据；不存在返回零值 + found=false。
-func (s *sqliteStore) GetCredential(provider string) (Credential, bool, error) {
+func (s *sqlStore) GetCredential(provider string) (Credential, bool, error) {
 	var c Credential
 	err := s.db.QueryRow(
 		`SELECT provider, token, extra, updated_at FROM credentials WHERE provider = ?`, provider).
@@ -256,25 +270,21 @@ func (s *sqliteStore) GetCredential(provider string) (Credential, bool, error) {
 }
 
 // SetCredential 写入/更新某网盘凭据。
-func (s *sqliteStore) SetCredential(provider, token, extra string) error {
-	_, err := s.db.Exec(
-		`INSERT INTO credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
-		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, extra=excluded.extra, updated_at=excluded.updated_at`,
+func (s *sqlStore) SetCredential(provider, token, extra string) error {
+	_, err := s.db.Exec(s.d.upsertCredential,
 		provider, token, extra, time.Now().Unix())
 	return err
 }
 
 // SetCredentialToken 只更新 token（用于 token 轮换时保存新值，不动 extra）。
-func (s *sqliteStore) SetCredentialToken(provider, token string) error {
-	_, err := s.db.Exec(
-		`INSERT INTO credentials (provider, token, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, updated_at=excluded.updated_at`,
+func (s *sqlStore) SetCredentialToken(provider, token string) error {
+	_, err := s.db.Exec(s.d.upsertCredToken,
 		provider, token, time.Now().Unix())
 	return err
 }
 
 // ListCredentialProviders 返回已配置凭据的网盘列表（不含 token 值，仅状态）。
-func (s *sqliteStore) ListCredentialProviders() (map[string]bool, error) {
+func (s *sqlStore) ListCredentialProviders() (map[string]bool, error) {
 	rows, err := s.db.Query(`SELECT provider, token != '' FROM credentials`)
 	if err != nil {
 		return nil, err
@@ -293,13 +303,9 @@ func (s *sqliteStore) ListCredentialProviders() (map[string]bool, error) {
 }
 
 // upsertStatus 是只改状态/错误的通用 upsert。
-func (s *sqliteStore) upsertStatus(resourceID int64, backend, status, errMsg string) error {
+func (s *sqlStore) upsertStatus(resourceID int64, backend, status, errMsg string) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(
-		`INSERT INTO cache_items (resource_id, backend, status, size, last_access, error, updated_at)
-		 VALUES (?, ?, ?, 0, 0, ?, ?)
-		 ON CONFLICT(resource_id) DO UPDATE SET
-		    backend=excluded.backend, status=excluded.status, error=excluded.error, updated_at=excluded.updated_at`,
+	_, err := s.db.Exec(s.d.upsertStatus,
 		resourceID, backend, status, errMsg, now)
 	return err
 }
