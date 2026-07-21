@@ -44,6 +44,11 @@ export default function Home() {
 
   return (
     <div>
+      <div className="page-head">
+        <h1>浏览</h1>
+        <p>浏览 OpenList 挂载的网盘文件与 Jellyfin 影库。</p>
+      </div>
+
       {/* 来源切换标签（只有多于一个源时才显示） */}
       {sources.length > 1 && (
         <div className="tabs">

@@ -50,12 +50,13 @@ export default function Resources() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <h2 style={{ marginRight: "auto" }}>资源库 · 按需转存</h2>
-        <button className="tab" onClick={doGenerateStrm}>
-          生成 strm
-        </button>
-        <button className="tab" onClick={() => setShow((s) => !s)}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+        <div className="page-head" style={{ marginRight: "auto", marginBottom: 0 }}>
+          <h1>资源库 · 按需转存</h1>
+          <p>收集的网盘分享；播放时才转存进你的网盘，闲置即删。</p>
+        </div>
+        <button onClick={doGenerateStrm}>生成 strm</button>
+        <button className="primary" onClick={() => setShow((s) => !s)}>
           {show ? "取消" : "+ 添加资源"}
         </button>
       </div>
@@ -73,7 +74,7 @@ export default function Resources() {
           <input placeholder="分享链接" value={form.shareUrl} onChange={(e) => setForm({ ...form, shareUrl: e.target.value })} />
           <input placeholder="提取码(可选)" value={form.sharePwd} onChange={(e) => setForm({ ...form, sharePwd: e.target.value })} />
           <input placeholder="分享内文件路径 如 /目录/片.mp4" value={form.filePath} onChange={(e) => setForm({ ...form, filePath: e.target.value })} />
-          <button className="tab active" onClick={submit}>保存</button>
+          <button className="primary" onClick={submit}>保存</button>
         </div>
       )}
 

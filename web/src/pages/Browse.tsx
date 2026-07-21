@@ -70,10 +70,10 @@ export default function Browse() {
 
   return (
     <div>
-      <h2>分享浏览器</h2>
-      <p className="muted" style={{ fontSize: 13 }}>
-        用分享链接 + 提取码浏览目录内容(只读,不下载/不转存/不播放)。
-      </p>
+      <div className="page-head">
+        <h1>分享浏览</h1>
+        <p>用分享链接 + 提取码浏览网盘目录（只读），可手动转存到自己的盘。</p>
+      </div>
 
       <div className="add-form">
         <input
@@ -88,7 +88,7 @@ export default function Browse() {
           onChange={(e) => setSharePwd(e.target.value)}
           style={{ flex: "0 1 160px" }}
         />
-        <button className="tab active" onClick={() => list("")} disabled={loading}>
+        <button className="primary" onClick={() => list("")} disabled={loading}>
           {loading ? "加载中…" : "浏览"}
         </button>
       </div>
