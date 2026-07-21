@@ -46,6 +46,13 @@ type Store interface {
 	SetCredential(provider, token, extra string) error
 	SetCredentialToken(provider, token string) error
 	ListCredentialProviders() (map[string]bool, error)
+
+	// 分享库（收藏的网盘分享链接）
+	AddShare(s Share) (int64, error)
+	ListShares() ([]Share, error)
+	GetShare(id int64) (Share, error)
+	UpdateShare(s Share) error
+	DeleteShare(id int64) error
 }
 
 // sqlStore 是 Store 的 database/sql 实现；方言差异(建表 DDL、upsert)由 dialect 收口。
@@ -272,6 +279,24 @@ type Credential struct {
 	Token     string `json:"token"`
 	Extra     string `json:"extra"`
 	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// Share 是收藏的一个网盘分享（整份分享，区别于 Resource 的单个文件）。
+type Share struct {
+	ID            int64  `json:"id"`
+	Provider      string `json:"provider"`      // aliyun / 115 / quark / ...
+	ShareURL      string `json:"shareUrl"`      // 分享链接
+	SharePwd      string `json:"sharePwd"`      // 提取码（可选）
+	ShareID       string `json:"shareId"`       // 从链接提取的分享 ID（可选）
+	Title         string `json:"title"`         // 名称/标题
+	Remark        string `json:"remark"`        // 备注
+	Category      string `json:"category"`      // 分类
+	Status        string `json:"status"`        // unknown / valid / invalid
+	LastCheckedAt int64  `json:"lastCheckedAt"` // 上次校验有效性（unix）
+	FileCount     int    `json:"fileCount"`     // 分享内条目数（浏览后缓存）
+	TotalSize     int64  `json:"totalSize"`     // 总大小（字节）
+	CreatedAt     int64  `json:"createdAt"`
+	UpdatedAt     int64  `json:"updatedAt"`
 }
 
 // GetCredential 取某网盘凭据；不存在返回零值 + found=false。

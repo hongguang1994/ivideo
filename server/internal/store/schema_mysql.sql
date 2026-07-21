@@ -35,3 +35,22 @@ CREATE TABLE IF NOT EXISTS credentials (
     extra      VARCHAR(2048) NOT NULL DEFAULT '',  -- 预留 JSON(如 open token、drive_id 等)
     updated_at BIGINT        NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 分享库:收藏的各网盘分享链接(整份分享,区别于 resources 的单个文件)。
+CREATE TABLE IF NOT EXISTS shares (
+    id              BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    provider        VARCHAR(32)   NOT NULL,                    -- aliyun / 115 / quark / pikpak / ...
+    share_url       VARCHAR(1024) NOT NULL,                    -- 分享链接
+    share_pwd       VARCHAR(64)       NULL,                    -- 提取码(可选)
+    share_id        VARCHAR(128)      NULL,                    -- 从链接提取的分享 ID(可选)
+    title           VARCHAR(512)      NULL,                    -- 名称/标题(可选)
+    remark          VARCHAR(1024)     NULL,                    -- 备注(可选)
+    category        VARCHAR(64)       NULL,                    -- 分类(可选)
+    status          VARCHAR(16)   NOT NULL DEFAULT 'unknown',  -- unknown / valid / invalid
+    last_checked_at BIGINT        NOT NULL DEFAULT 0,          -- 上次校验有效性(unix)
+    file_count      INT           NOT NULL DEFAULT 0,          -- 分享内条目数(浏览后缓存,0=未知)
+    total_size      BIGINT        NOT NULL DEFAULT 0,          -- 总大小(字节,0=未知)
+    created_at      BIGINT        NOT NULL,
+    updated_at      BIGINT        NOT NULL,
+    UNIQUE KEY uniq_provider_url (provider, share_url(200))    -- 防重复收藏
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

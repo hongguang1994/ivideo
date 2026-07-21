@@ -34,3 +34,22 @@ CREATE TABLE IF NOT EXISTS credentials (
     extra      TEXT NOT NULL DEFAULT '',  -- 预留 JSON（如 open token、drive_id 等）
     updated_at INTEGER NOT NULL
 );
+
+-- 分享库：收藏的各网盘分享链接（整份分享，区别于 resources 的单个文件）。
+CREATE TABLE IF NOT EXISTS shares (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT    NOT NULL,                    -- aliyun / 115 / quark / pikpak / ...
+    share_url       TEXT    NOT NULL,                    -- 分享链接
+    share_pwd       TEXT,                                -- 提取码（可选）
+    share_id        TEXT,                                -- 从链接提取的分享 ID（可选，便于查重/调用）
+    title           TEXT,                                -- 名称/标题（可选）
+    remark          TEXT,                                -- 备注（可选）
+    category        TEXT,                                -- 分类：电影/剧集/音乐/...（可选）
+    status          TEXT    NOT NULL DEFAULT 'unknown',  -- unknown / valid / invalid
+    last_checked_at INTEGER NOT NULL DEFAULT 0,          -- 上次校验有效性（unix）
+    file_count      INTEGER NOT NULL DEFAULT 0,          -- 分享内条目数（浏览后缓存，0=未知）
+    total_size      INTEGER NOT NULL DEFAULT 0,          -- 总大小（字节，0=未知）
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    UNIQUE (provider, share_url)                         -- 防重复收藏
+);
