@@ -72,3 +72,9 @@ type HLSStreamer interface {
 type OriginalURLProvider interface {
 	OriginalURL(ctx context.Context, cachePath string) (string, error)
 }
+
+// TokenVerifier 是可选能力：实测校验某类凭据当前是否有效(会真的向网盘发一次请求)。
+// provider 取 "aliyun"(网页版 token)/ "aliyun_open"(开放接口 token)等。
+type TokenVerifier interface {
+	Verify(ctx context.Context, provider string) error
+}

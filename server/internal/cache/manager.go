@@ -54,32 +54,33 @@ func (m *Manager) EnsureReady(resourceID int64) (store.CacheItem, error) {
 	return item, nil
 }
 
-// StreamURL 确保已转存后，实时取一个可播直链（HLS 地址短时有效，每次现取）。
+// StreamURL 取转码 HLS 直链（HLS 地址短时有效，每次现取）。
+// 薄封装：决策逻辑统一在 Resolve 里。
 func (m *Manager) StreamURL(resourceID int64) (string, error) {
-	item, err := m.EnsureReady(resourceID)
+	r, err := m.Resolve(resourceID, KindHLS)
 	if err != nil {
 		return "", err
 	}
-	if item.Status != store.StatusReady || item.CachePath == "" {
-		return "", fmt.Errorf("资源尚未就绪（%s）", item.Status)
-	}
-	return m.backend.DirectURL(context.Background(), item.CachePath)
+	return r.URL, nil
 }
 
 // OriginalURL 取「原画直链」(供 Emby/Jellyfin 的 strm 使用)。
-// 适配器需实现 OriginalURLProvider，否则回退到 DirectURL。
+// 薄封装：决策逻辑统一在 Resolve 里（适配器不支持原画时自动回退转码）。
 func (m *Manager) OriginalURL(resourceID int64) (string, error) {
-	item, err := m.EnsureReady(resourceID)
+	r, err := m.Resolve(resourceID, KindOriginal)
 	if err != nil {
 		return "", err
 	}
-	if item.Status != store.StatusReady || item.CachePath == "" {
-		return "", fmt.Errorf("资源尚未就绪（%s）", item.Status)
+	return r.URL, nil
+}
+
+// VerifyProvider 实测校验某网盘凭据是否有效(适配器需实现 TokenVerifier)。
+func (m *Manager) VerifyProvider(provider string) error {
+	v, ok := m.backend.(TokenVerifier)
+	if !ok {
+		return fmt.Errorf("当前缓存盘适配器(%s)不支持凭据校验", m.backend.Name())
 	}
-	if p, ok := m.backend.(OriginalURLProvider); ok {
-		return p.OriginalURL(context.Background(), item.CachePath)
-	}
-	return m.backend.DirectURL(context.Background(), item.CachePath)
+	return v.Verify(context.Background(), provider)
 }
 
 // ListShare 列出分享内目录(适配器需实现 ShareLister)。

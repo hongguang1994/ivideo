@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/cache"
 	"ivideo/server/internal/resp"
 
 	"ivideo/server/internal/store"
@@ -46,12 +48,14 @@ func (h *Handler) FileGateway(c *gin.Context) {
 		return
 	}
 
-	// GET:确保已转存,跳转到原画直链。
-	url, err := h.cache.OriginalURL(id)
+	// GET:经 Resolve 决策(按需转存 + 记访问 + 选流),拿到实际取到的流类型后跳转。
+	res, err := h.cache.Resolve(id, cache.KindOriginal)
 	if err != nil {
 		// 未就绪(转存中)时告诉客户端稍后重试。
 		resp.Fail(c, http.StatusTooEarly, err.Error())
 		return
 	}
-	c.Redirect(http.StatusFound, url)
+	c.Header("X-Stream-Kind", string(res.Kind)) // original / hls：让外部看到实际给了哪种流
+	slog.Info("播放解析", "resource", id, "kind", res.Kind, "size", res.Item.Size)
+	c.Redirect(http.StatusFound, res.URL)
 }

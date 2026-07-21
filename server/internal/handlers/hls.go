@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/base64"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ivideo/server/internal/cache"
 	"ivideo/server/internal/resp"
 )
 
@@ -92,13 +94,15 @@ func (h *Handler) HLSPlaylist(c *gin.Context) {
 
 // servePlaylist 确保资源已转存,取到 HLS 地址后改写输出。
 func (h *Handler) servePlaylist(c *gin.Context, id int64) {
-	u, err := h.cache.StreamURL(id)
+	res, err := h.cache.Resolve(id, cache.KindHLS)
 	if err != nil {
 		// 未就绪(转存中):让客户端稍后重试。
 		resp.Fail(c, http.StatusTooEarly, err.Error())
 		return
 	}
-	h.renderPlaylist(c, u)
+	c.Header("X-Stream-Kind", string(res.Kind))
+	slog.Info("播放解析", "resource", id, "kind", res.Kind, "size", res.Item.Size)
+	h.renderPlaylist(c, res.URL)
 }
 
 // renderPlaylist 拉取上游 m3u8,把其中的地址改写成走本站同源代理。

@@ -189,6 +189,22 @@ func (a *Aliyun) SaveToFolder(ctx context.Context, share cache.ShareRef, srcPath
 // IsHLS 阿里的 DirectURL 返回的是转码 HLS 播放列表。
 func (a *Aliyun) IsHLS() bool { return true }
 
+// Verify 实测校验凭据是否有效:尝试换取访问令牌,成功即有效。
+//   - aliyun:刷新网页版 token(access 已缓存且未过期时不触发刷新/轮换)
+//   - aliyun_open:刷新开放接口 token
+func (a *Aliyun) Verify(ctx context.Context, provider string) error {
+	switch provider {
+	case "aliyun", "":
+		_, err := a.webToken(ctx)
+		return err
+	case "aliyun_open":
+		_, err := a.openAccessToken(ctx)
+		return err
+	default:
+		return fmt.Errorf("阿里适配器不支持校验 provider: %s", provider)
+	}
+}
+
 // OriginalURL 用开放接口取「原画直链」(mkv/mp4 本体,支持 Range)。
 // 供 Emby/Jellyfin(strm) 使用；浏览器仍用 DirectURL 的转码 HLS。
 func (a *Aliyun) OriginalURL(ctx context.Context, cachePath string) (string, error) {
