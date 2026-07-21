@@ -156,11 +156,22 @@ export interface Provider {
   name: string;
   authMethod: "qrcode" | "cookie" | "token";
   authorized: boolean;
+  updatedAt: number; // 上次授权/更新时间(unix 秒,0=从未)
 }
 
 export async function getProviders(): Promise<Provider[]> {
   const d = await apiFetch<{ providers: Provider[] }>("/settings/providers");
   return d.providers;
+}
+
+export interface HealthResult {
+  healthy: boolean;
+  message: string;
+}
+
+// 实测校验某网盘令牌是否仍有效(真去 ping 网盘)。
+export function checkProvider(provider: string): Promise<HealthResult> {
+  return post<HealthResult>("/settings/providers/check", { provider });
 }
 
 // 保存某网盘凭据(阿里开放接口 refresh token / 115、夸克 cookie)。
