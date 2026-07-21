@@ -11,22 +11,46 @@ import (
 	"ivideo/server/internal/aliauth"
 )
 
-// Providers 返回各网盘的授权状态,供设置页展示。
+// Providers 返回各网盘的授权状态(含上次更新时间),供设置页展示。
 // GET /api/settings/providers
 func (h *Handler) Providers(c *gin.Context) {
-	m, err := h.store.ListCredentialProviders()
-	if err != nil {
-		resp.Fail(c, http.StatusInternalServerError, err.Error())
-		return
+	defs := []struct{ provider, name, method string }{
+		{"aliyun", "阿里云盘", "qrcode"},
+		{"aliyun_open", "阿里云盘 · 开放接口(原画直链)", "token"},
+		{"115", "115网盘", "cookie"},
+		{"quark", "夸克网盘", "cookie"},
 	}
-	// 固定列出支持的网盘,标注是否已授权。
-	out := []gin.H{
-		{"provider": "aliyun", "name": "阿里云盘", "authMethod": "qrcode", "authorized": m["aliyun"]},
-		{"provider": "aliyun_open", "name": "阿里云盘 · 开放接口(原画直链)", "authMethod": "token", "authorized": m["aliyun_open"]},
-		{"provider": "115", "name": "115网盘", "authMethod": "cookie", "authorized": m["115"]},
-		{"provider": "quark", "name": "夸克网盘", "authMethod": "cookie", "authorized": m["quark"]},
+	out := make([]gin.H, 0, len(defs))
+	for _, d := range defs {
+		cr, found, _ := h.store.GetCredential(d.provider)
+		out = append(out, gin.H{
+			"provider":   d.provider,
+			"name":       d.name,
+			"authMethod": d.method,
+			"authorized": found && cr.Token != "",
+			"updatedAt":  cr.UpdatedAt, // 上次授权/更新时间(unix,0=从未)
+		})
 	}
 	resp.OK(c, gin.H{"providers": out})
+}
+
+// CheckProvider 实测校验某网盘凭据是否仍有效(真去 ping 网盘换令牌)。
+// POST /api/settings/providers/check  body: {provider}
+// 注意:校验 aliyun 若触发刷新会轮换网页版 token(适配器会回写库,保持一致)。
+func (h *Handler) CheckProvider(c *gin.Context) {
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Provider == "" {
+		resp.Fail(c, http.StatusBadRequest, "缺少 provider")
+		return
+	}
+	if err := h.cache.VerifyProvider(req.Provider); err != nil {
+		// 校验失败不是接口错误,而是"令牌无效"的正常结果。
+		resp.OK(c, gin.H{"healthy": false, "message": err.Error()})
+		return
+	}
+	resp.OK(c, gin.H{"healthy": true, "message": "有效"})
 }
 
 // SaveToken 保存某网盘的凭据(目前用于阿里开放接口 refresh token / 将来 115、夸克 cookie)。
