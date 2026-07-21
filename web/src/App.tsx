@@ -4,6 +4,7 @@ import Watch from "./pages/Watch";
 import Settings from "./pages/Settings";
 import Resources from "./pages/Resources";
 import Browse from "./pages/Browse";
+import Shares from "./pages/Shares";
 import CachePanel from "./pages/CachePanel";
 
 type NavItem = { to: string; ico: string; label: string; end?: boolean };
@@ -13,6 +14,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     section: "浏览",
     items: [
       { to: "/", ico: "🏠", label: "首页", end: true },
+      { to: "/shares", ico: "🔗", label: "分享库" },
       { to: "/browse", ico: "🗂️", label: "分享浏览" },
       { to: "/resources", ico: "🎬", label: "资源库" },
     ],
@@ -65,6 +67,7 @@ export default function App() {
             <Route path="/watch" element={<Watch />} />
             <Route path="/resources" element={<Resources />} />
             <Route path="/browse" element={<Browse />} />
+            <Route path="/shares" element={<Shares />} />
             <Route path="/cache" element={<CachePanel />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

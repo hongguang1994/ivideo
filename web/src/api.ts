@@ -197,6 +197,46 @@ export function evictCache(resource: number): Promise<unknown> {
   return post("/cache/evict", { resource });
 }
 
+// ---- 分享库(收藏的网盘分享)----
+
+export interface Share {
+  id: number;
+  provider: string;
+  shareUrl: string;
+  sharePwd: string;
+  shareId: string;
+  title: string;
+  remark: string;
+  category: string;
+  status: string; // unknown / valid / invalid
+  lastCheckedAt: number;
+  fileCount: number;
+  totalSize: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function getShares(): Promise<Share[]> {
+  const d = await apiFetch<{ shares: Share[] }>("/shares");
+  return d.shares || [];
+}
+
+export function addShare(s: Partial<Share>): Promise<Share> {
+  return post<Share>("/shares", s);
+}
+
+export function updateShare(id: number, s: Partial<Share>): Promise<unknown> {
+  return apiFetch(`/shares/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(s),
+  });
+}
+
+export function deleteShare(id: number): Promise<unknown> {
+  return apiFetch(`/shares/${id}`, { method: "DELETE" });
+}
+
 // 保存某网盘凭据(阿里开放接口 refresh token / 115、夸克 cookie)。
 export function saveProviderToken(provider: string, token: string, extra?: string): Promise<unknown> {
   return post("/settings/token", { provider, token, extra });

@@ -18,4 +18,10 @@ func registerResources(api *gin.RouterGroup, h *handlers.Handler) {
 	// 缓存/即删管理面板
 	api.GET("/cache", h.CacheItems)
 	api.POST("/cache/evict", h.EvictCache)
+
+	// 分享库(收藏的网盘分享链接)
+	api.GET("/shares", h.ListShares)
+	api.POST("/shares", h.AddShare)
+	api.PUT("/shares/:id", h.UpdateShare)
+	api.DELETE("/shares/:id", h.DeleteShare)
 }
