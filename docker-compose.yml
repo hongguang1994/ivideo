@@ -13,6 +13,9 @@ services:
       - "5244:5244"
     volumes:
       - ./data/openlist:/opt/openlist/data
+      # 与 ivideo-jellyfin 共用同一宿主目录：Strm 驱动 SaveStrmToLocal
+      # 写到 /media/strm，Jellyfin 即可扫到（两边都映射 ./data/media）。
+      - ./data/media:/media
     environment:
       - TZ=Asia/Shanghai
       - UMASK=022
