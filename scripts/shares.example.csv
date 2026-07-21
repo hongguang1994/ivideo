@@ -1,0 +1,11 @@
+# 批量导入分享的示例清单 —— 全是【假数据】,仅用于 demo 空跑演示。
+# 格式: driver,mount_path,字段1,字段2,字段3
+#   aliyun 行: aliyun,挂载名,share_id,share_pwd,root_folder_id
+#   115 行:   115,挂载名,share_code,receive_code,root_folder_id
+#
+# 阿里 refresh_token 不写在这里(全清单共用一个,通过环境变量 ALIYUN_REFRESH_TOKEN 传)。
+
+aliyun,/演示-纪录片,FAKE_share_id_aaa,,root
+aliyun,/演示-公开课,FAKE_share_id_bbb,demo,root
+115,/演示-音乐合集,FAKE_share_code_ccc,FAKE_recv_1,0
+115,/演示-有声书,FAKE_share_code_ddd,FAKE_recv_2,0
