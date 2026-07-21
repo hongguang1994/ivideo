@@ -74,6 +74,27 @@ func (m *Manager) OriginalURL(resourceID int64) (string, error) {
 	return r.URL, nil
 }
 
+// ListCached 返回所有已缓存(ready)的项,按 last_access 升序(最久未看在前)。
+func (m *Manager) ListCached() ([]store.CacheItem, error) {
+	return m.store.ListReady()
+}
+
+// Evict 手动删除某资源的缓存(删网盘文件 + 标记已清理 + 清回收站)。
+func (m *Manager) Evict(resourceID int64) error {
+	item, err := m.store.GetCacheItem(resourceID)
+	if err != nil {
+		return err
+	}
+	if item.Status != store.StatusReady {
+		return fmt.Errorf("资源未处于已缓存状态(%s)", item.Status)
+	}
+	if !m.evict(item) { // 复用清理任务的淘汰逻辑(含 inflight 检查)
+		return fmt.Errorf("删除失败(可能正在转存中)")
+	}
+	_ = m.backend.EmptyTrash(context.Background())
+	return nil
+}
+
 // VerifyProvider 实测校验某网盘凭据是否有效(适配器需实现 TokenVerifier)。
 func (m *Manager) VerifyProvider(provider string) error {
 	v, ok := m.backend.(TokenVerifier)

@@ -174,6 +174,29 @@ export function checkProvider(provider: string): Promise<HealthResult> {
   return post<HealthResult>("/settings/providers/check", { provider });
 }
 
+export interface CacheEntry {
+  resourceId: number;
+  title: string;
+  size: number;
+  lastAccess: number;
+  status: string;
+}
+export interface CacheList {
+  items: CacheEntry[];
+  totalCount: number;
+  totalBytes: number;
+}
+
+// 已缓存(转存进自己网盘)的资源列表 + 总量。
+export function getCacheItems(): Promise<CacheList> {
+  return apiFetch<CacheList>("/cache");
+}
+
+// 手动删除某资源的缓存(释放自己网盘空间)。
+export function evictCache(resource: number): Promise<unknown> {
+  return post("/cache/evict", { resource });
+}
+
 // 保存某网盘凭据(阿里开放接口 refresh token / 115、夸克 cookie)。
 export function saveProviderToken(provider: string, token: string, extra?: string): Promise<unknown> {
   return post("/settings/token", { provider, token, extra });
