@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { addShare, deleteShare, getShares, type Share } from "../api";
 
 const PROVIDERS = [
@@ -38,6 +39,7 @@ export default function Shares() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
   const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
 
   const load = () =>
     getShares()
@@ -173,7 +175,19 @@ export default function Shares() {
                     {s.totalSize > 0 && ` · ${fmtSize(s.totalSize)}`}
                   </div>
                 </div>
-                <button onClick={() => remove(s.id)}>删除</button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    className="primary"
+                    onClick={() =>
+                      navigate("/browse", {
+                        state: { shareUrl: s.shareUrl, sharePwd: s.sharePwd, provider: s.provider },
+                      })
+                    }
+                  >
+                    浏览
+                  </button>
+                  <button onClick={() => remove(s.id)}>删除</button>
+                </div>
               </div>
             );
           })}
