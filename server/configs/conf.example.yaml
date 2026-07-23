@@ -43,6 +43,11 @@ cache:
   # 停止播放且过了这个宽限期(分钟)才删 —— "停了才删,暂停不删"。
   stop_grace_minutes: 10
 
+# 分享导入(ImportShare):遍历分享把视频建成资源
+import:
+  max_depth: 8      # 最大递归目录深度(太深的片会漏,大分享调大)
+  max_files: 2000   # 单次最多导多少个视频
+
 aliyun:
   temp_folder_id: "root"            # 转存缓存的目标目录 file_id
   drive_id: ""                      # 留空自动取资源盘

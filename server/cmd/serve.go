@@ -34,7 +34,6 @@ func runServer() error {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 	defer st.Close()
-	seedIfEmpty(st)
 
 	r, err := app.New(cfg, st)
 	if err != nil {
@@ -70,22 +69,4 @@ func runServer() error {
 	}
 	slog.Info("ivideo 已停止")
 	return nil
-}
-
-// seedIfEmpty 在资源目录为空时写入几条示例，便于首次联调。
-func seedIfEmpty(st store.Store) {
-	n, err := st.CountResources()
-	if err != nil || n > 0 {
-		return
-	}
-	samples := []store.Resource{
-		{Title: "示例影片 A（阿里分享）", Provider: "aliyun", ShareURL: "https://www.alipan.com/s/example-a", Overview: "用于联调的示例资源"},
-		{Title: "示例影片 B（阿里分享）", Provider: "aliyun", ShareURL: "https://www.alipan.com/s/example-b", Overview: "用于联调的示例资源"},
-	}
-	for _, s := range samples {
-		if _, err := st.AddResource(s); err != nil {
-			slog.Error("seed 失败", "err", err)
-		}
-	}
-	slog.Info("已写入示例资源", "count", len(samples))
 }

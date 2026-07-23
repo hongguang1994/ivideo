@@ -41,6 +41,10 @@ type Config struct {
 	CacheCleanInterval int    // 清理任务间隔（分钟）
 	CacheStopGrace     int    // 停止播放后多久删（分钟，会话感知）
 
+	// ---- 分享导入 ----
+	ImportMaxDepth int // 导入分享时最大递归深度
+	ImportMaxFiles int // 单次导入最多多少个视频
+
 	// ---- 阿里云盘适配器（Share2Open 转存缓存）----
 	AliyunRefreshToken     string // web 接口 refresh token（小雅的 mytoken.txt），用于转存/分享token
 	AliyunOpenRefreshToken string // 开放接口 refresh token（小雅的 myopentoken.txt），用于取直链
@@ -135,6 +139,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.clean_interval_minutes", 10)
 	v.SetDefault("cache.stop_grace_minutes", 10)
 
+	v.SetDefault("import.max_depth", 8)
+	v.SetDefault("import.max_files", 2000)
+
 	v.SetDefault("aliyun.refresh_token", "")
 	v.SetDefault("aliyun.open_refresh_token", "")
 	v.SetDefault("aliyun.open_client_id", "")
@@ -186,6 +193,8 @@ func Load(cfgFile string) (Config, error) {
 		CacheMaxBytes:      v.GetInt64("cache.max_bytes"),
 		CacheTTLHours:      v.GetInt("cache.ttl_hours"),
 		CacheStopGrace:     v.GetInt("cache.stop_grace_minutes"),
+		ImportMaxDepth:     v.GetInt("import.max_depth"),
+		ImportMaxFiles:     v.GetInt("import.max_files"),
 		CacheCleanInterval: v.GetInt("cache.clean_interval_minutes"),
 
 		AliyunRefreshToken:     v.GetString("aliyun.refresh_token"),

@@ -13,12 +13,6 @@ import (
 	"ivideo/server/internal/store"
 )
 
-// 批量导入的安全上限，避免一个巨大分享把库刷爆。
-const (
-	importMaxDepth = 4
-	importMaxFiles = 500
-)
-
 // BrowseShare 列出分享内某目录，供前端挑选要导入的子目录。
 // GET /api/share/browse?shareUrl=...&sharePwd=...&path=/子目录
 func (h *Handler) BrowseShare(c *gin.Context) {
@@ -91,6 +85,9 @@ func (h *Handler) ImportShare(c *gin.Context) {
 	}
 	share := cache.ShareRef{Provider: req.Provider, ShareURL: req.ShareURL, SharePwd: req.SharePwd}
 
+	maxDepth := h.cfg.ImportMaxDepth
+	maxFiles := h.cfg.ImportMaxFiles
+
 	// 已有资源的 (shareUrl, filePath) 集合，用于去重。
 	existing := map[string]bool{}
 	if list, err := h.store.ListResources(); err == nil {
@@ -111,7 +108,7 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		depth int
 	}
 	queue := []node{{path: req.Path, depth: 0}}
-	for len(queue) > 0 && added < importMaxFiles {
+	for len(queue) > 0 && added < maxFiles {
 		cur := queue[0]
 		queue = queue[1:]
 
@@ -122,7 +119,7 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		}
 		for _, e := range entries {
 			if e.IsDir {
-				if cur.depth < importMaxDepth {
+				if cur.depth < maxDepth {
 					queue = append(queue, node{path: e.Path, depth: cur.depth + 1})
 				}
 				continue
@@ -134,7 +131,7 @@ func (h *Handler) ImportShare(c *gin.Context) {
 				skipped++
 				continue
 			}
-			if added >= importMaxFiles {
+			if added >= maxFiles {
 				break
 			}
 			title := strings.TrimSuffix(e.Name, path.Ext(e.Name))
@@ -160,7 +157,7 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		}
 		out["errors"] = errs
 	}
-	if added >= importMaxFiles {
+	if added >= maxFiles {
 		out["note"] = "已达单次导入上限，可对子目录再次导入"
 	}
 	resp.OK(c, out)
