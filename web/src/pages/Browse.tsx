@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { browseShare, saveShareItem, type ShareEntry } from "../api";
+import { browseShare, importShare, saveShareItem, type ShareEntry } from "../api";
 
 // 格式化文件大小
 function humanSize(n: number): string {
@@ -26,6 +26,23 @@ export default function Browse() {
   const [targetFolder, setTargetFolder] = useState("ivideo"); // 转存目标目录
   const [saving, setSaving] = useState(""); // 正在转存的条目 path
   const [saved, setSaved] = useState<Record<string, string>>({}); // path -> 状态文案
+  const [importMsg, setImportMsg] = useState("");
+  const [importingDir, setImportingDir] = useState(false);
+
+  // 把【当前目录】递归导入成资源(不转存),用于精简导入某个子目录而非整个分享。
+  const importDir = async () => {
+    setImportingDir(true);
+    setImportMsg("");
+    setError("");
+    try {
+      const r = await importShare(shareUrl.trim(), sharePwd.trim(), "aliyun", path);
+      setImportMsg(`✅ 导入 ${r.added} 个视频（跳过 ${r.skipped} 个已存在）`);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setImportingDir(false);
+    }
+  };
 
   const save = async (e: ShareEntry) => {
     setSaving(e.path);
@@ -119,17 +136,25 @@ export default function Browse() {
                 </a>
               )}
             </span>
-            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-              转存到我的阿里盘:
-              <input
-                value={targetFolder}
-                onChange={(e) => setTargetFolder(e.target.value)}
-                className="token-input"
-                style={{ flex: "0 0 160px" }}
-                placeholder="ivideo"
-              />
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="primary" onClick={importDir} disabled={importingDir}>
+                {importingDir ? "导入中…" : "导入此目录到资源库"}
+              </button>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                转存到我的阿里盘:
+                <input
+                  value={targetFolder}
+                  onChange={(e) => setTargetFolder(e.target.value)}
+                  className="token-input"
+                  style={{ flex: "0 0 160px" }}
+                  placeholder="ivideo"
+                />
+              </span>
             </span>
           </div>
+          {importMsg && (
+            <p style={{ color: "#86efac", margin: "4px 0 12px" }}>{importMsg}</p>
+          )}
           {items.length === 0 && !loading && <p className="muted">这个目录是空的。</p>}
           <div className="browse-list">
             {items.map((it) => (
