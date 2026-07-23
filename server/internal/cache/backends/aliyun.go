@@ -198,8 +198,17 @@ func (a *Aliyun) WalkShare(ctx context.Context, share cache.ShareRef) ([]cache.S
 	if err != nil {
 		return nil, err
 	}
+	// 起点:默认分享根;share.FilePath 指定了子目录则从那里开始(精简导入某目录)。
+	startID, prefix := "root", ""
+	if sp := strings.TrimRight(share.FilePath, "/"); sp != "" {
+		id, _, err := a.resolveFileID(ctx, shareID, shareTok, sp)
+		if err != nil {
+			return nil, fmt.Errorf("解析起始目录 %q 失败: %w", sp, err)
+		}
+		startID, prefix = id, sp
+	}
 	var out []cache.ShareEntry
-	err = a.walkShareByID(ctx, shareID, shareTok, "root", "", 0, &out)
+	err = a.walkShareByID(ctx, shareID, shareTok, startID, prefix, 0, &out)
 	return out, err
 }
 

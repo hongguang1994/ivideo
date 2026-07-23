@@ -83,7 +83,8 @@ func (h *Handler) ImportShare(c *gin.Context) {
 	if req.Provider == "" {
 		req.Provider = "aliyun"
 	}
-	share := cache.ShareRef{Provider: req.Provider, ShareURL: req.ShareURL, SharePwd: req.SharePwd}
+	// FilePath 作为遍历起点:传了 path 就只导那个子目录（精简导入）。
+	share := cache.ShareRef{Provider: req.Provider, ShareURL: req.ShareURL, SharePwd: req.SharePwd, FilePath: req.Path}
 
 	maxDepth := h.cfg.ImportMaxDepth
 	maxFiles := h.cfg.ImportMaxFiles
