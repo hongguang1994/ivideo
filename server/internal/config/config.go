@@ -39,6 +39,7 @@ type Config struct {
 	CacheMaxBytes      int64  // 缓存总量上限，超过按 LRU 淘汰
 	CacheTTLHours      int    // 超过多久没看就清理
 	CacheCleanInterval int    // 清理任务间隔（分钟）
+	CacheStopGrace     int    // 停止播放后多久删（分钟，会话感知）
 
 	// ---- 阿里云盘适配器（Share2Open 转存缓存）----
 	AliyunRefreshToken     string // web 接口 refresh token（小雅的 mytoken.txt），用于转存/分享token
@@ -132,6 +133,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.max_bytes", int64(200*1024*1024*1024)) // 200 GB
 	v.SetDefault("cache.ttl_hours", 72)
 	v.SetDefault("cache.clean_interval_minutes", 10)
+	v.SetDefault("cache.stop_grace_minutes", 10)
 
 	v.SetDefault("aliyun.refresh_token", "")
 	v.SetDefault("aliyun.open_refresh_token", "")
@@ -183,6 +185,7 @@ func Load(cfgFile string) (Config, error) {
 		CacheDir:           v.GetString("cache.dir"),
 		CacheMaxBytes:      v.GetInt64("cache.max_bytes"),
 		CacheTTLHours:      v.GetInt("cache.ttl_hours"),
+		CacheStopGrace:     v.GetInt("cache.stop_grace_minutes"),
 		CacheCleanInterval: v.GetInt("cache.clean_interval_minutes"),
 
 		AliyunRefreshToken:     v.GetString("aliyun.refresh_token"),

@@ -17,17 +17,24 @@ type Manager struct {
 
 	mu       sync.Mutex
 	inflight map[int64]bool // 正在转存的资源 ID，用于去重
+
+	sessions  SessionSource   // 会话源（Jellyfin）：为 nil 时退回纯 TTL 清理
+	stoppedAt map[int64]int64 // 资源 → 首次"离开会话"的时间(unix)，用于停止宽限期
 }
 
 // NewManager 创建缓存管理器。
 func NewManager(st store.Store, backend CacheBackend, cacheDir string) *Manager {
 	return &Manager{
-		store:    st,
-		backend:  backend,
-		cacheDir: cacheDir,
-		inflight: make(map[int64]bool),
+		store:     st,
+		backend:   backend,
+		cacheDir:  cacheDir,
+		inflight:  make(map[int64]bool),
+		stoppedAt: make(map[int64]int64),
 	}
 }
+
+// SetSessionSource 注入会话源（如 Jellyfin），启用"停了才删、暂停不删"。
+func (m *Manager) SetSessionSource(s SessionSource) { m.sessions = s }
 
 // EnsureReady 确保某资源已转存。
 // 已就绪则刷新访问时间并返回；否则**非阻塞**地触发后台转存，返回当前状态（转存中）。

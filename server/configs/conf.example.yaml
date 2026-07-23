@@ -37,8 +37,11 @@ cache:
   backend: "fake"                   # fake(本地联调) / aliyun
   dir: "/ivideo-cache"
   max_bytes: 214748364800           # 缓存上限,默认 200GB
-  ttl_hours: 72                     # 闲置多久清理
+  ttl_hours: 72                     # 闲置多久清理(会话感知的兜底/安全网)
   clean_interval_minutes: 10        # 清理任务间隔
+  # 会话感知清理:配了 jellyfin.api_key 后,正在播放/暂停的不删,
+  # 停止播放且过了这个宽限期(分钟)才删 —— "停了才删,暂停不删"。
+  stop_grace_minutes: 10
 
 aliyun:
   temp_folder_id: "root"            # 转存缓存的目标目录 file_id

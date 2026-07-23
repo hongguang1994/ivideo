@@ -35,7 +35,11 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 		return nil, err
 	}
 	cm := cache.NewManager(st, backend, cfg.CacheDir)
-	cm.StartCleanup(cfg.CacheCleanInterval, cfg.CacheTTLHours, cfg.CacheMaxBytes)
+	// 有 Jellyfin 时启用「会话感知清理」：正在播放/暂停的资源不删，停止且过宽限期才删。
+	if jf != nil {
+		cm.SetSessionSource(cache.NewJellyfinSessions(jf, cfg.MediaDir))
+	}
+	cm.StartCleanup(cfg.CacheCleanInterval, cfg.CacheTTLHours, cfg.CacheMaxBytes, cfg.CacheStopGrace)
 	slog.Info("缓存盘适配器已就绪", "backend", backend.Name())
 
 	h := handlers.New(cfg, ol, jf, st, cm)
