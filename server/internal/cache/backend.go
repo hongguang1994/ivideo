@@ -54,6 +54,12 @@ type ShareLister interface {
 	ListShare(ctx context.Context, share ShareRef, subPath string) ([]ShareEntry, error)
 }
 
+// ShareWalker 是可选能力：高效遍历整个分享，一次性返回所有文件条目。
+// 相比逐目录 ListShare，API 调用量大减，避免网盘限流(用于批量导入)。
+type ShareWalker interface {
+	WalkShare(ctx context.Context, share ShareRef) ([]ShareEntry, error)
+}
+
 // ShareSaver 是可选能力：把分享内某路径「手动转存」到自己盘的指定目录。
 // 这条独立于按需转存缓存 —— 存进去的文件是永久留存，不受清理任务影响。
 type ShareSaver interface {

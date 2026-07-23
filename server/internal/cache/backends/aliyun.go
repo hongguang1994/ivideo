@@ -186,6 +186,63 @@ func (a *Aliyun) SaveToFolder(ctx context.Context, share cache.ShareRef, srcPath
 	return err
 }
 
+// WalkShare 高效遍历整个分享,返回所有【文件】条目。
+// 只换一次 share_token、按 file_id 递归(不像逐目录 ListShare 每次重取 token+重解析路径),
+// API 调用量从 O(目录数×深度) 降到 O(目录数),避免阿里 429 限流;并对 429 指数退避重试。
+func (a *Aliyun) WalkShare(ctx context.Context, share cache.ShareRef) ([]cache.ShareEntry, error) {
+	shareID := parseAliShareID(share.ShareURL)
+	if shareID == "" {
+		return nil, fmt.Errorf("无法解析 share_id: %s", share.ShareURL)
+	}
+	shareTok, err := a.shareToken(ctx, shareID, share.SharePwd)
+	if err != nil {
+		return nil, err
+	}
+	var out []cache.ShareEntry
+	err = a.walkShareByID(ctx, shareID, shareTok, "root", "", 0, &out)
+	return out, err
+}
+
+// walkShareByID 按 file_id 递归收集文件。子目录失败(重试后仍限流)则跳过,不中断整体。
+func (a *Aliyun) walkShareByID(ctx context.Context, shareID, shareTok, parentID, prefix string, depth int, out *[]cache.ShareEntry) error {
+	if depth > 30 { // 安全上限,防异常深度/循环挂载
+		return nil
+	}
+	items, err := a.listShareRetry(ctx, shareID, shareTok, parentID, 5)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		p := prefix + "/" + it.Name
+		if it.Type == "folder" {
+			// 单枝失败不致命:跳过继续走其余。
+			_ = a.walkShareByID(ctx, shareID, shareTok, it.FileID, p, depth+1, out)
+			continue
+		}
+		*out = append(*out, cache.ShareEntry{Name: it.Name, Path: p, Size: it.Size})
+	}
+	return nil
+}
+
+// listShareRetry 列目录,遇 429/限流指数退避重试;非限流错误直接返回。
+func (a *Aliyun) listShareRetry(ctx context.Context, shareID, shareTok, parentID string, attempts int) ([]shareItem, error) {
+	delay := 600 * time.Millisecond
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		items, err := a.listShare(ctx, shareID, shareTok, parentID)
+		if err == nil {
+			return items, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "429") && !strings.Contains(err.Error(), "TooManyRequests") {
+			return nil, err
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return nil, lastErr
+}
+
 // IsHLS 阿里的 DirectURL 返回的是转码 HLS 播放列表。
 func (a *Aliyun) IsHLS() bool { return true }
 

@@ -120,6 +120,16 @@ func (m *Manager) ListShare(share ShareRef, subPath string) ([]ShareEntry, error
 	return p.ListShare(context.Background(), share, subPath)
 }
 
+// WalkShare 高效遍历整个分享,返回所有文件条目。ok=false 表示适配器不支持(应回退逐目录)。
+func (m *Manager) WalkShare(share ShareRef) (entries []ShareEntry, ok bool, err error) {
+	w, ok := m.backend.(ShareWalker)
+	if !ok {
+		return nil, false, nil
+	}
+	entries, err = w.WalkShare(context.Background(), share)
+	return entries, true, err
+}
+
 // SaveShare 把分享内某路径手动转存到自己盘指定目录(适配器需实现 ShareSaver)。
 func (m *Manager) SaveShare(share ShareRef, srcPath, targetFolder string) error {
 	p, ok := m.backend.(ShareSaver)

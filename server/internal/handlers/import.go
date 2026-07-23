@@ -102,51 +102,81 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		errs    []string
 	)
 
-	// 广度优先遍历，带深度与数量上限。
-	type node struct {
-		path  string
-		depth int
-	}
-	queue := []node{{path: req.Path, depth: 0}}
-	for len(queue) > 0 && added < maxFiles {
-		cur := queue[0]
-		queue = queue[1:]
-
-		entries, err := h.cache.ListShare(share, cur.path)
-		if err != nil {
-			errs = append(errs, cur.path+": "+err.Error())
-			continue
+	// 优先高效遍历（一次 share_token + file_id 递归 + 429 退避），避免限流。
+	if entries, ok, werr := h.cache.WalkShare(share); ok {
+		if werr != nil {
+			errs = append(errs, werr.Error())
 		}
 		for _, e := range entries {
-			if e.IsDir {
-				if cur.depth < maxDepth {
-					queue = append(queue, node{path: e.Path, depth: cur.depth + 1})
-				}
-				continue
+			if added >= maxFiles {
+				break
 			}
-			if !h.isVideo(e.Name) {
+			if e.IsDir || !h.isVideo(e.Name) {
 				continue
 			}
 			if existing[req.ShareURL+"\x00"+e.Path] {
 				skipped++
 				continue
 			}
-			if added >= maxFiles {
-				break
-			}
 			title := strings.TrimSuffix(e.Name, path.Ext(e.Name))
 			if _, err := h.store.AddResource(store.Resource{
-				Title:    title,
-				Provider: req.Provider,
-				ShareURL: req.ShareURL,
-				SharePwd: req.SharePwd,
-				FilePath: e.Path,
+				Title: title, Provider: req.Provider, ShareURL: req.ShareURL,
+				SharePwd: req.SharePwd, FilePath: e.Path,
 			}); err != nil {
 				errs = append(errs, e.Path+": "+err.Error())
 				continue
 			}
 			existing[req.ShareURL+"\x00"+e.Path] = true
 			added++
+		}
+	} else {
+
+		// 广度优先遍历，带深度与数量上限。
+		type node struct {
+			path  string
+			depth int
+		}
+		queue := []node{{path: req.Path, depth: 0}}
+		for len(queue) > 0 && added < maxFiles {
+			cur := queue[0]
+			queue = queue[1:]
+
+			entries, err := h.cache.ListShare(share, cur.path)
+			if err != nil {
+				errs = append(errs, cur.path+": "+err.Error())
+				continue
+			}
+			for _, e := range entries {
+				if e.IsDir {
+					if cur.depth < maxDepth {
+						queue = append(queue, node{path: e.Path, depth: cur.depth + 1})
+					}
+					continue
+				}
+				if !h.isVideo(e.Name) {
+					continue
+				}
+				if existing[req.ShareURL+"\x00"+e.Path] {
+					skipped++
+					continue
+				}
+				if added >= maxFiles {
+					break
+				}
+				title := strings.TrimSuffix(e.Name, path.Ext(e.Name))
+				if _, err := h.store.AddResource(store.Resource{
+					Title:    title,
+					Provider: req.Provider,
+					ShareURL: req.ShareURL,
+					SharePwd: req.SharePwd,
+					FilePath: e.Path,
+				}); err != nil {
+					errs = append(errs, e.Path+": "+err.Error())
+					continue
+				}
+				existing[req.ShareURL+"\x00"+e.Path] = true
+				added++
+			}
 		}
 	}
 
