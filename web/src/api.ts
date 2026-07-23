@@ -237,6 +237,22 @@ export function deleteShare(id: number): Promise<unknown> {
   return apiFetch(`/shares/${id}`, { method: "DELETE" });
 }
 
+export interface ImportResult {
+  added: number;
+  skipped: number;
+  errors?: string[];
+}
+
+// 把一个分享里的视频递归导入成资源(不转存,只登记来源)。
+export function importShare(
+  shareUrl: string,
+  sharePwd: string,
+  provider = "aliyun",
+  path = ""
+): Promise<ImportResult> {
+  return post<ImportResult>("/resources/import", { shareUrl, sharePwd, provider, path });
+}
+
 // 保存某网盘凭据(阿里开放接口 refresh token / 115、夸克 cookie)。
 export function saveProviderToken(provider: string, token: string, extra?: string): Promise<unknown> {
   return post("/settings/token", { provider, token, extra });

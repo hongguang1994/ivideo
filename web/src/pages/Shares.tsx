@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { addShare, deleteShare, getShares, type Share } from "../api";
+import { addShare, deleteShare, getShares, importShare, type Share } from "../api";
 
 const PROVIDERS = [
   { value: "aliyun", label: "阿里云盘" },
@@ -39,7 +39,23 @@ export default function Shares() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState<number | null>(null);
+  const [msg, setMsg] = useState("");
   const navigate = useNavigate();
+
+  const doImport = async (s: Share) => {
+    setImporting(s.id);
+    setError("");
+    setMsg("");
+    try {
+      const r = await importShare(s.shareUrl, s.sharePwd, s.provider);
+      setMsg(`✅ 「${s.title || s.shareId || s.shareUrl}」导入 ${r.added} 个视频（跳过 ${r.skipped} 个已存在）`);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setImporting(null);
+    }
+  };
 
   const load = () =>
     getShares()
@@ -94,6 +110,14 @@ export default function Shares() {
           style={{ borderColor: "rgba(248,113,113,.4)", margin: "16px 0", color: "#fca5a5" }}
         >
           出错了: {error}
+        </div>
+      )}
+      {msg && (
+        <div
+          className="panel"
+          style={{ borderColor: "rgba(74,222,128,.4)", margin: "16px 0", color: "#86efac" }}
+        >
+          {msg}
         </div>
       )}
 
@@ -176,6 +200,9 @@ export default function Shares() {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => doImport(s)} disabled={importing === s.id}>
+                    {importing === s.id ? "导入中…" : "导入到资源库"}
+                  </button>
                   <button
                     className="primary"
                     onClick={() =>
