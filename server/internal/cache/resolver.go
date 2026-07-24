@@ -33,8 +33,10 @@ type Resolution struct {
 // 自动选流」「大码率换 TV 令牌不限速」「不同网盘不同取法」等,全部收口到这里,
 // 各 handler 只管调 Resolve、不再自己判断去哪取。
 func (m *Manager) Resolve(resourceID int64, kind StreamKind) (Resolution, error) {
-	// —— 决策①:准备好没?未就绪触发转存,已就绪记访问。——
-	item, err := m.EnsureReady(resourceID)
+	// —— 决策①:准备好没?未就绪则触发转存并等它完成,已就绪记一次访问。——
+	// 同步等待:秒转存通常几秒内完成,让播放器一次拿到 302 就行,
+	// 别让它撞上 425 —— Jellyfin 探测失败会永久记错媒体信息。
+	item, err := m.WaitReady(resourceID, transferWaitTimeout)
 	if err != nil {
 		return Resolution{}, err
 	}

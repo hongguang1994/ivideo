@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"ivideo/server/internal/store"
 )
@@ -59,6 +60,41 @@ func (m *Manager) EnsureReady(resourceID int64) (store.CacheItem, error) {
 	// 返回触发后的最新状态（大概率是 transferring）。
 	item, _ = m.store.GetCacheItem(resourceID)
 	return item, nil
+}
+
+// 按需转存的等待参数。阿里是**秒转存**（服务端 copy，不搬运字节），正常几百毫秒~数秒完成。
+// 播放器拿不到 200 就会出问题 —— 尤其 Jellyfin 扫库探测：一次失败就把媒体信息
+// 记成「容器/编码不支持」，之后每次播放都强制转码。所以这里同步等，不甩 425。
+const (
+	transferWaitTimeout  = 60 * time.Second
+	transferPollInterval = 300 * time.Millisecond
+)
+
+// WaitReady 确保资源就绪：已就绪直接返回；未转存则触发转存并**等待**其完成（有超时）。
+func (m *Manager) WaitReady(resourceID int64, timeout time.Duration) (store.CacheItem, error) {
+	item, err := m.EnsureReady(resourceID)
+	if err != nil {
+		return item, err
+	}
+	if item.Status == store.StatusReady && item.CachePath != "" {
+		return item, nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(transferPollInterval)
+		item, err = m.store.GetCacheItem(resourceID)
+		if err != nil {
+			return item, err
+		}
+		if item.Status == store.StatusReady && item.CachePath != "" {
+			return item, nil
+		}
+		if item.Status == store.StatusFailed {
+			return item, fmt.Errorf("转存失败: %s", item.Error)
+		}
+	}
+	return item, fmt.Errorf("转存超时(%s 未完成)", timeout)
 }
 
 // StreamURL 取转码 HLS 直链（HLS 地址短时有效，每次现取）。
