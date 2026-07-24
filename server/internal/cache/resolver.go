@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"ivideo/server/internal/store"
 )
@@ -46,7 +47,15 @@ func (m *Manager) Resolve(resourceID int64, kind StreamKind) (Resolution, error)
 
 	ctx := context.Background()
 
-	// —— 决策②:去哪取、取什么流?——
+	// —— 决策②:原画喂得动吗?——
+	// 阿里对**原画下载**限速(实测约 0.5MB/s ≈ 4 Mbps)，但**转码预览流不限速**
+	// (实测 52 Mbps)。所以片源码率超过原画通道能力时，硬走原画必然卡，
+	// 此时自动降级到转码流 —— 画质让一步，换来能看。
+	if kind == KindOriginal && m.originalTooBig(ctx, resourceID, item) {
+		kind = KindHLS
+	}
+
+	// —— 决策③:去哪取、取什么流?——
 	// 原画:适配器实现了 OriginalURLProvider 才走;否则回退到转码。
 	if kind == KindOriginal {
 		if p, ok := m.backend.(OriginalURLProvider); ok {
@@ -65,4 +74,51 @@ func (m *Manager) Resolve(resourceID int64, kind StreamKind) (Resolution, error)
 		return Resolution{}, err
 	}
 	return Resolution{URL: url, Kind: KindHLS, Item: item}, nil
+}
+
+// originalTooBig 判断「这个片源的码率是否超出原画通道的带宽能力」。
+// 码率 = 文件大小×8 / 时长。取不到时长(网盘没给/接口失败)时返回 false ——
+// 宁可按原画走，也不要因为一次查询失败就把所有片都降级成转码。
+func (m *Manager) originalTooBig(ctx context.Context, resourceID int64, item store.CacheItem) bool {
+	if m.originalMaxMbps <= 0 || item.Size <= 0 {
+		return false // 阈值为 0 = 关闭自动选流
+	}
+	dur, ok := m.videoDuration(ctx, resourceID, item.CachePath)
+	if !ok || dur <= 0 {
+		return false
+	}
+	mbps := float64(item.Size) * 8 / dur / 1e6
+	if mbps <= m.originalMaxMbps {
+		return false
+	}
+	slog.Info("码率超出原画通道能力，自动改走转码流",
+		"resource", resourceID, "码率Mbps", fmt.Sprintf("%.1f", mbps),
+		"阈值Mbps", m.originalMaxMbps)
+	return true
+}
+
+// videoDuration 取视频时长，带进程内缓存 —— 播放器会对同一资源发很多次请求，
+// 不能每次都去问网盘。
+func (m *Manager) videoDuration(ctx context.Context, resourceID int64, cachePath string) (float64, bool) {
+	m.mu.Lock()
+	if d, hit := m.durations[resourceID]; hit {
+		m.mu.Unlock()
+		return d, true
+	}
+	m.mu.Unlock()
+
+	p, ok := m.backend.(MediaProber)
+	if !ok {
+		return 0, false
+	}
+	d, err := p.VideoDurationSeconds(ctx, cachePath)
+	if err != nil {
+		slog.Warn("取视频时长失败，本次按原画处理", "resource", resourceID, "err", err)
+		return 0, false
+	}
+
+	m.mu.Lock()
+	m.durations[resourceID] = d
+	m.mu.Unlock()
+	return d, true
 }

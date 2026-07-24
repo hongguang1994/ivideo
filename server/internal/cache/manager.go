@@ -21,6 +21,11 @@ type Manager struct {
 
 	sessions  SessionSource   // 会话源（Jellyfin）：为 nil 时退回纯 TTL 清理
 	stoppedAt map[int64]int64 // 资源 → 首次"离开会话"的时间(unix)，用于停止宽限期
+
+	// 自动选流：码率超过 originalMaxMbps 的片源改走转码流（0 = 关闭，一律原画）。
+	// durations 缓存视频时长，避免同一资源反复问网盘。
+	originalMaxMbps float64
+	durations       map[int64]float64
 }
 
 // NewManager 创建缓存管理器。
@@ -31,8 +36,13 @@ func NewManager(st store.Store, backend CacheBackend, cacheDir string) *Manager 
 		cacheDir:  cacheDir,
 		inflight:  make(map[int64]bool),
 		stoppedAt: make(map[int64]int64),
+		durations: make(map[int64]float64),
 	}
 }
+
+// SetOriginalMaxMbps 设定原画通道能吃下的最大码率(Mbps)。
+// 超过它的片源在解析时自动改走转码流。0 表示关闭自动选流、一律走原画。
+func (m *Manager) SetOriginalMaxMbps(v float64) { m.originalMaxMbps = v }
 
 // SetSessionSource 注入会话源（如 Jellyfin），启用"停了才删、暂停不删"。
 func (m *Manager) SetSessionSource(s SessionSource) { m.sessions = s }

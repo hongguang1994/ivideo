@@ -318,6 +318,16 @@ func (a *Aliyun) OriginalURL(ctx context.Context, cachePath string) (string, err
 	return a.originalURL(ctx, openTok, cachePath)
 }
 
+// VideoDurationSeconds 取已转存文件的视频时长(秒)，0 表示未知。
+// 配合文件大小估算码率，供上层决定走原画还是转码流。
+func (a *Aliyun) VideoDurationSeconds(ctx context.Context, cachePath string) (float64, error) {
+	accessTok, err := a.webToken(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return a.videoDuration(ctx, accessTok, cachePath)
+}
+
 // Delete 删除已转存文件（进回收站）。
 func (a *Aliyun) Delete(ctx context.Context, cachePath string) error {
 	accessTok, err := a.webToken(ctx)

@@ -79,6 +79,13 @@ type OriginalURLProvider interface {
 	OriginalURL(ctx context.Context, cachePath string) (string, error)
 }
 
+// MediaProber 是可选能力：能报出已缓存文件的视频时长。
+// 时长配合文件大小即可估算码率，用来判断「原画直链的带宽够不够喂这个片源」。
+// 返回 0 表示网盘没给时长（非视频、或还没分析完），调用方按“未知”处理。
+type MediaProber interface {
+	VideoDurationSeconds(ctx context.Context, cachePath string) (float64, error)
+}
+
 // TokenVerifier 是可选能力：实测校验某类凭据当前是否有效(会真的向网盘发一次请求)。
 // provider 取 "aliyun"(网页版 token)/ "aliyun_open"(开放接口 token)等。
 type TokenVerifier interface {

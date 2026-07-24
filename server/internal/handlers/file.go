@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -57,5 +58,12 @@ func (h *Handler) FileGateway(c *gin.Context) {
 	}
 	c.Header("X-Stream-Kind", string(res.Kind)) // original / hls：让外部看到实际给了哪种流
 	slog.Info("播放解析", "resource", id, "kind", res.Kind, "size", res.Item.Size)
+
+	// 被自动降级成转码流时，跳到**我们自己的** HLS 入口而不是阿里的裸 m3u8 ——
+	// 分片要经本服务代理才能取到，这条链路也是既有的、验证过的。
+	if res.Kind == cache.KindHLS {
+		c.Redirect(http.StatusFound, fmt.Sprintf("%s%s/hls/%d.m3u8", h.cfg.SiteURL, APIPrefix, id))
+		return
+	}
 	c.Redirect(http.StatusFound, res.URL)
 }

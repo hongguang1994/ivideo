@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,7 @@ const (
 	pathFileDelete      = "/v3/file/delete"                      // apiBase：删除(进回收站)
 	pathRecyclebinClear = "/v2/recyclebin/clear"                 // apiBase：清空回收站
 	pathCreateFolder    = "/adrive/v2/file/createWithFolders"    // apiBase：创建文件夹
+	pathFileGet         = "/v2/file/get"                         // apiBase：取文件详情(含视频时长)
 	pathUserGet         = "/v2/user/get"                         // userBase：取网盘信息
 	pathOpenDownload    = "/adrive/v1.0/openFile/getDownloadUrl" // openBase：开放接口取原画直链
 )
@@ -596,4 +598,28 @@ func truncateBody(b []byte) string {
 		return string(b[:300]) + "…"
 	}
 	return string(b)
+}
+
+// videoDuration 取自己盘里某文件的视频时长(秒)。
+// 用于估算码率(码率 = 大小×8/时长)，进而决定走原画还是转码流。
+// 返回 0 表示阿里没给时长(非视频/尚未转码完成)，调用方应按“未知”处理。
+func (a *Aliyun) videoDuration(ctx context.Context, accessTok, fileID string) (float64, error) {
+	body := map[string]string{"drive_id": a.driveID, "file_id": fileID}
+	var out struct {
+		VideoMediaMetadata struct {
+			Duration string `json:"duration"`
+		} `json:"video_media_metadata"`
+	}
+	headers := map[string]string{"Authorization": "Bearer " + accessTok}
+	if err := a.doJSON(ctx, a.apiBase+pathFileGet, headers, body, &out); err != nil {
+		return 0, err
+	}
+	if out.VideoMediaMetadata.Duration == "" {
+		return 0, nil
+	}
+	d, err := strconv.ParseFloat(out.VideoMediaMetadata.Duration, 64)
+	if err != nil {
+		return 0, nil
+	}
+	return d, nil
 }

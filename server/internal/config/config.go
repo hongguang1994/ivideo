@@ -27,6 +27,11 @@ type Config struct {
 	//               而转码流约 3.7MB/s，故默认用 HLS 保证流畅。
 	//   original —— 原画直链。画质最好，适合开了会员/不限速的账号。
 	StrmMode string
+	// OriginalMaxMbps 是原画通道能稳定喂动的最大码率(Mbps)。
+	// 阿里对**原画下载**限速(实测约 0.5MB/s ≈ 4 Mbps)，但**转码预览流不限速**
+	// (实测 52 Mbps)。码率超过它的片源自动改走转码流，避免硬走原画卡成幻灯片。
+	// 0 = 关闭自动选流，一律按 StrmMode 走。
+	OriginalMaxMbps float64
 	// StrmAutoInterval 是 strm 媒体库定时兜底重建的间隔（分钟）。
 	// 导入完成后会即时重建，这里只是覆盖「不经导入接口的资源变动」。<=0 表示只在启动时生成一次。
 	StrmAutoInterval int
@@ -140,6 +145,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("media_dir", "/media")
 	v.SetDefault("site_url", "http://localhost:8090")
 	v.SetDefault("strm.mode", "hls")
+	v.SetDefault("stream.original_max_mbps", 3.5)
 	v.SetDefault("strm.auto_interval_minutes", 30)
 
 	v.SetDefault("db.driver", "sqlite")
@@ -200,6 +206,7 @@ func Load(cfgFile string) (Config, error) {
 		MediaDir:         v.GetString("media_dir"),
 		SiteURL:          strings.TrimRight(v.GetString("site_url"), "/"),
 		StrmMode:         v.GetString("strm.mode"),
+		OriginalMaxMbps:  v.GetFloat64("stream.original_max_mbps"),
 		StrmAutoInterval: v.GetInt("strm.auto_interval_minutes"),
 
 		DBDriver:               v.GetString("db.driver"),

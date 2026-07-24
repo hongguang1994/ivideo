@@ -39,6 +39,8 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	if jf != nil {
 		cm.SetSessionSource(cache.NewJellyfinSessions(jf, cfg.MediaDir))
 	}
+	// 自动选流：码率超过阈值的片源改走转码流（原画通道被阿里限速，喂不动高码率）。
+	cm.SetOriginalMaxMbps(cfg.OriginalMaxMbps)
 	cm.StartCleanup(cfg.CacheCleanInterval, cfg.CacheTTLHours, cfg.CacheMaxBytes, cfg.CacheStopGrace)
 	slog.Info("缓存盘适配器已就绪", "backend", backend.Name())
 

@@ -20,6 +20,12 @@ db:
   dsn: ""                           # mysql 专用,如 user:pass@tcp(mysql:3306)/ivideo?charset=utf8mb4
 db_path: "/data/ivideo.db"          # SQLite 文件(driver=sqlite 时用)
 
+# 自动选流:阿里对**原画下载**限速(实测约 0.5MB/s ≈ 4 Mbps),但**转码预览流不限速**
+# (实测 52 Mbps)。所以码率高于阈值的片源自动改走转码流 —— 画质让一步,换来不卡。
+# 低码率片源(番剧、普通压制)仍走原画。0 = 关闭,一律按 strm.mode 走。
+stream:
+  original_max_mbps: 3.5
+
 strm:
   mode: "hls"                       # hls(转码,流畅) / original(原画,需不限速账号)
   # strm 自动维护:导入完成后即时重建;这里是定时兜底间隔(分钟),覆盖不经导入接口的变动。
