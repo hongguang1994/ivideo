@@ -197,7 +197,28 @@ func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
 const (
 	renewStyleOPList = "oplist" // api.oplist.org：GET ?refresh_ui=&driver_txt=
 	renewStyleAList  = "alist"  // api.alistgo.com：POST {"grant_type","refresh_token"}
+
+	oplistRenewURL = "https://api.oplist.org/alicloud/renewapi"
+	alistRenewURL  = "https://api.alistgo.com/alist/ali_open/token"
 )
+
+// renewTargetFor 按**令牌自身的来源**挑中转服务。
+// 令牌是哪家签发的就必须回哪家续期 —— refresh_token 绑定签发它的 client_id，
+// 拿去别家换会直接被拒。来源记在凭据的 extra 字段里（设置页保存时选的类型）：
+//
+//	alicloud_tv / alicloud_qr —— oplist 签发
+//	alist                     —— AList 签发
+//
+// 认不出来源时回落到配置里的默认值。
+func (a *Aliyun) renewTargetFor(extra string) (url, style string) {
+	switch extra {
+	case "alicloud_tv", "alicloud_qr":
+		return oplistRenewURL, renewStyleOPList
+	case "alist":
+		return alistRenewURL, renewStyleAList
+	}
+	return a.openRenewURL, a.openRenewStyle
+}
 
 // ---- 开放接口(取原画直链)----
 
@@ -229,6 +250,13 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		Text         string `json:"text"`
 	}
 
+	// 令牌是哪家签发的就回哪家续期（extra 记录来源）。
+	extra := ""
+	if a.tokens != nil {
+		extra = a.tokens.GetTokenExtra("aliyun_open")
+	}
+	renewURL, renewStyle := a.renewTargetFor(extra)
+
 	if a.openClientID != "" {
 		// 自己的开放平台应用：走官方端点
 		body := map[string]string{
@@ -240,24 +268,22 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		if err := a.doJSON(ctx, a.openTokenURL, nil, body, &out); err != nil {
 			return "", fmt.Errorf("开放接口换 token 失败: %w", err)
 		}
-	} else if a.openRenewStyle == renewStyleAList {
+	} else if renewStyle == renewStyleAList {
 		// AList 的中转服务(api.alistgo.com)：POST JSON。
 		// 注意它和 oplist 是**两个不同的开放平台应用**，阿里按 client_id 限速，
 		// 所以换成它有可能拿到不同的下载配额 —— 值得实测。
 		body := map[string]string{"grant_type": "refresh_token", "refresh_token": rt}
-		if err := a.doJSON(ctx, a.openRenewURL, nil, body, &out); err != nil {
+		if err := a.doJSON(ctx, renewURL, nil, body, &out); err != nil {
 			return "", fmt.Errorf("AList token 服务换 token 失败: %w", err)
 		}
 	} else {
 		// 在线 token 服务：GET ?refresh_ui=<rt>&server_use=true&driver_txt=alicloud_qr
-		driverTxt := "alicloud_qr"
-		if a.tokens != nil {
-			if e := a.tokens.GetTokenExtra("aliyun_open"); e != "" {
-				driverTxt = e
-			}
+		driverTxt := extra
+		if driverTxt == "" {
+			driverTxt = "alicloud_qr"
 		}
 		u := fmt.Sprintf("%s?refresh_ui=%s&server_use=true&driver_txt=%s",
-			a.openRenewURL, url.QueryEscape(rt), url.QueryEscape(driverTxt))
+			renewURL, url.QueryEscape(rt), url.QueryEscape(driverTxt))
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return "", err

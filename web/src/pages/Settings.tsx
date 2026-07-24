@@ -36,6 +36,8 @@ export default function Settings() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [openToken, setOpenToken] = useState("");
+  // 令牌来源。必须和实际签发它的服务一致 —— refresh_token 绑定签发它的应用，
+  // 选错了续期时会被对方拒掉。
   const [openType, setOpenType] = useState("alicloud_tv");
   const pollRef = useRef<number | null>(null);
 
@@ -261,8 +263,9 @@ export default function Settings() {
                     onChange={(e) => setOpenType(e.target.value)}
                     style={{ flex: "0 0 180px" }}
                   >
-                    <option value="alicloud_tv">TV版扫码(不限速)</option>
-                    <option value="alicloud_qr">OAuth2扫码(限速)</option>
+                    <option value="alicloud_tv">oplist · TV版(高配额)</option>
+                    <option value="alist">AList 扫码</option>
+                    <option value="alicloud_qr">oplist · OAuth2</option>
                   </select>
                   <input
                     placeholder="粘贴开放接口 refresh token"
@@ -290,30 +293,31 @@ export default function Settings() {
       <div className="panel" style={{ maxWidth: 740, marginTop: 22 }}>
         <b>关于「开放接口(原画直链)」</b>
         <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: "8px 0 0" }}>
-          用于取<b>原画直链</b>。阿里<b>按应用(client_id)限速</b>，所以令牌从哪家中转服务拿的，
-          直接决定你的下载速度 —— 同一文件实测：
+          用于取<b>原画直链</b>。阿里<b>按应用(client_id)限速</b>，令牌从哪家拿的直接决定下载速度。
+          同一部片实测：
         </p>
         <ul className="muted" style={{ fontSize: 13, lineHeight: 1.8, margin: "6px 0 0 18px" }}>
           <li>
-            <b>AList</b> 约 2~20 MB/s（16~158 Mbps）—— 够播蓝光原盘，<b>推荐</b>
+            <b>oplist · TV版</b> —— 高配额，<b>推荐</b>。够喂高码率片源
           </li>
-          <li>OpenList(oplist) 约 0.5 MB/s（4 Mbps）—— 只够普通压制，蓝光会卡</li>
+          <li>AList / oplist · OAuth2 —— 约 0.5 MB/s(4 Mbps)，只够低码率片源</li>
         </ul>
         <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: "8px 0 0" }}>
-          取 token：打开{" "}
+          取 TV 版 token：打开{" "}
           <a
-            href="https://alistgo.com/tool/aliyundrive/request.html"
+            href="https://api.oplist.org"
             target="_blank"
             rel="noreferrer"
             style={{ color: "var(--accent-2)" }}
           >
-            alistgo.com 的取 token 工具
+            api.oplist.org
           </a>{" "}
-          → 扫码 → 复制 Refresh Token 粘到上面（类型选 OAuth2 扫码）。换中转服务需同步改配置
-          <code> aliyun.open_renew_url / open_renew_style</code>。
+          → 选「阿里云盘 (Client) TV版扫码」→ 勾「使用 OpenList 提供的参数」→ 扫码 → 复制 Refresh
+          Token 粘到上面，<b>类型必须选对</b>（续期要回到签发它的那家，选错会被拒）。
         </p>
         <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: "8px 0 0" }}>
-          注：oplist 的「TV版扫码」通道服务端已损坏（返回「刷新Token失败」），暂不可用。
+          原画喂不动的片会<b>自动降级到转码流</b>（阈值 <code>stream.original_max_mbps</code>）。
+          换上高配额令牌后可把阈值调大，让更多片走原画。
         </p>
       </div>
     </div>
