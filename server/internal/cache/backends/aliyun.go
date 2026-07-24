@@ -58,6 +58,18 @@ type Aliyun struct {
 	accessExp time.Time
 	openTok   string
 	openExp   time.Time
+
+	// 分享目录列表缓存：同一目录短时间内重复列取直接命中，
+	// 明显减少阿里调用（浏览/导入时最有效），也就更不容易触发 429。
+	listMu    sync.Mutex
+	listCache map[string]listCacheEntry
+	listTTL   time.Duration
+}
+
+// listCacheEntry 是一条目录列表缓存。
+type listCacheEntry struct {
+	items []shareItem
+	exp   time.Time
 }
 
 // NewAliyun 从配置创建阿里云盘适配器；tokens 用于读写扫码后的持久化 token。
@@ -79,7 +91,45 @@ func NewAliyun(cfg config.Config, tokens TokenStore) *Aliyun {
 		userBase:         cfg.AliyunUserBase,
 		browserUA:        cfg.AliyunBrowserUA,
 		http:             &http.Client{Timeout: 30 * time.Second},
+		listCache:        make(map[string]listCacheEntry),
+		listTTL:          time.Duration(cfg.AliyunListCacheSeconds) * time.Second,
 	}
+}
+
+// listCacheGet 取缓存的目录列表；未命中或已过期返回 ok=false。
+func (a *Aliyun) listCacheGet(key string) ([]shareItem, bool) {
+	if a.listTTL <= 0 {
+		return nil, false
+	}
+	a.listMu.Lock()
+	defer a.listMu.Unlock()
+	e, ok := a.listCache[key]
+	if !ok || time.Now().After(e.exp) {
+		return nil, false
+	}
+	return e.items, true
+}
+
+// listCachePut 写入目录列表缓存；超过容量上限时先清过期项，仍超则整体清空（简单够用）。
+func (a *Aliyun) listCachePut(key string, items []shareItem) {
+	if a.listTTL <= 0 {
+		return
+	}
+	a.listMu.Lock()
+	defer a.listMu.Unlock()
+	const maxEntries = 2000
+	if len(a.listCache) >= maxEntries {
+		now := time.Now()
+		for k, e := range a.listCache {
+			if now.After(e.exp) {
+				delete(a.listCache, k)
+			}
+		}
+		if len(a.listCache) >= maxEntries {
+			a.listCache = make(map[string]listCacheEntry, maxEntries)
+		}
+	}
+	a.listCache[key] = listCacheEntry{items: items, exp: time.Now().Add(a.listTTL)}
 }
 
 func (a *Aliyun) Name() string { return "aliyun" }

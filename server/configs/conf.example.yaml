@@ -49,6 +49,8 @@ import:
   max_files: 2000   # 单次最多导多少个视频
 
 aliyun:
+  # 分享目录列表缓存秒数:同一目录短时间内重复列取直接命中,少打阿里、少触发 429(0=关闭)
+  list_cache_seconds: 60
   temp_folder_id: "root"            # 转存缓存的目标目录 file_id
   drive_id: ""                      # 留空自动取资源盘
   # 开放接口(取原画直链)

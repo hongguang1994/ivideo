@@ -67,6 +67,9 @@ type Config struct {
 	AliyunUserBase  string // 如 https://user.alipan.com
 	AliyunBrowserUA string // 请求在线 token 服务时伪装的浏览器 UA
 
+	// 分享目录列表缓存秒数（减少重复列目录的阿里调用，降低限流风险；0=关闭）
+	AliyunListCacheSeconds int
+
 	// HLSAllowedHosts 是 HLS 代理允许转发的上游主机白名单（防开放代理）。
 	HLSAllowedHosts []string
 
@@ -139,6 +142,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.clean_interval_minutes", 10)
 	v.SetDefault("cache.stop_grace_minutes", 10)
 
+	v.SetDefault("aliyun.list_cache_seconds", 60)
+
 	v.SetDefault("import.max_depth", 8)
 	v.SetDefault("import.max_files", 2000)
 
@@ -185,17 +190,18 @@ func Load(cfgFile string) (Config, error) {
 		SiteURL:  strings.TrimRight(v.GetString("site_url"), "/"),
 		StrmMode: v.GetString("strm.mode"),
 
-		DBDriver:           v.GetString("db.driver"),
-		DBDSN:              v.GetString("db.dsn"),
-		DBPath:             v.GetString("db_path"),
-		CacheBackend:       v.GetString("cache.backend"),
-		CacheDir:           v.GetString("cache.dir"),
-		CacheMaxBytes:      v.GetInt64("cache.max_bytes"),
-		CacheTTLHours:      v.GetInt("cache.ttl_hours"),
-		CacheStopGrace:     v.GetInt("cache.stop_grace_minutes"),
-		ImportMaxDepth:     v.GetInt("import.max_depth"),
-		ImportMaxFiles:     v.GetInt("import.max_files"),
-		CacheCleanInterval: v.GetInt("cache.clean_interval_minutes"),
+		DBDriver:               v.GetString("db.driver"),
+		DBDSN:                  v.GetString("db.dsn"),
+		DBPath:                 v.GetString("db_path"),
+		CacheBackend:           v.GetString("cache.backend"),
+		CacheDir:               v.GetString("cache.dir"),
+		CacheMaxBytes:          v.GetInt64("cache.max_bytes"),
+		CacheTTLHours:          v.GetInt("cache.ttl_hours"),
+		CacheStopGrace:         v.GetInt("cache.stop_grace_minutes"),
+		AliyunListCacheSeconds: v.GetInt("aliyun.list_cache_seconds"),
+		ImportMaxDepth:         v.GetInt("import.max_depth"),
+		ImportMaxFiles:         v.GetInt("import.max_files"),
+		CacheCleanInterval:     v.GetInt("cache.clean_interval_minutes"),
 
 		AliyunRefreshToken:     v.GetString("aliyun.refresh_token"),
 		AliyunOpenRefreshToken: v.GetString("aliyun.open_refresh_token"),

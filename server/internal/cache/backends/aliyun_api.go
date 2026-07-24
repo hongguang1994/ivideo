@@ -343,6 +343,11 @@ func (a *Aliyun) listShare(ctx context.Context, shareID, shareTok, parentID stri
 	if parentID == "" {
 		parentID = "root"
 	}
+	// 短时缓存：同一分享的同一目录重复列取直接命中，少打阿里、少触发限流。
+	cacheKey := shareID + "\x00" + parentID
+	if cached, ok := a.listCacheGet(cacheKey); ok {
+		return cached, nil
+	}
 	headers := map[string]string{"x-share-token": shareTok}
 	var items []shareItem
 	marker := ""
@@ -370,6 +375,7 @@ func (a *Aliyun) listShare(ctx context.Context, shareID, shareTok, parentID stri
 		}
 		marker = out.NextMarker
 	}
+	a.listCachePut(cacheKey, items)
 	return items, nil
 }
 
