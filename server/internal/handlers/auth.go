@@ -82,6 +82,54 @@ func (h *Handler) SaveToken(c *gin.Context) {
 	resp.OK(c, gin.H{"ok": true})
 }
 
+// AliyunOpenQR 申请「开放接口」扫码二维码（取原画直链要的令牌）。
+// POST /api/auth/aliyun/open/qr
+// 需先配置 aliyun.open_client_id / open_client_secret（自己在阿里开放平台注册应用）。
+func (h *Handler) AliyunOpenQR(c *gin.Context) {
+	if h.cfg.AliyunOpenClientID == "" || h.cfg.AliyunOpenClientSecret == "" {
+		resp.Fail(c, http.StatusBadRequest,
+			"未配置阿里开放平台 client_id/client_secret，无法自助扫码。请在配置里填入自己的应用凭据；或用 api.oplist.org 取到令牌后粘贴到下面。")
+		return
+	}
+	sess, err := aliauth.OpenGenerate(c.Request.Context(), h.cfg.AliyunOpenBase,
+		h.cfg.AliyunOpenClientID, h.cfg.AliyunOpenClientSecret)
+	if err != nil {
+		resp.Fail(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	resp.OK(c, sess)
+}
+
+// AliyunOpenQRStatus 轮询开放接口扫码状态；确认后换 refresh_token 并存库。
+// POST /api/auth/aliyun/open/qr/status  body: {sid}
+func (h *Handler) AliyunOpenQRStatus(c *gin.Context) {
+	var req struct {
+		SID string `json:"sid"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.SID == "" {
+		resp.Fail(c, http.StatusBadRequest, "缺少 sid")
+		return
+	}
+	status, authCode, err := aliauth.OpenQueryStatus(c.Request.Context(), h.cfg.AliyunOpenBase, req.SID)
+	if err != nil {
+		resp.Fail(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	if status == aliauth.OpenStatusLoginSuccess && authCode != "" {
+		rt, err := aliauth.OpenExchangeToken(c.Request.Context(), h.cfg.AliyunOpenBase,
+			h.cfg.AliyunOpenClientID, h.cfg.AliyunOpenClientSecret, authCode)
+		if err != nil {
+			resp.Fail(c, http.StatusBadGateway, "换取 refresh_token 失败: "+err.Error())
+			return
+		}
+		if err := h.store.SetCredential("aliyun_open", rt, "alicloud_qr"); err != nil {
+			resp.Fail(c, http.StatusInternalServerError, "保存令牌失败: "+err.Error())
+			return
+		}
+	}
+	resp.OK(c, gin.H{"status": status})
+}
+
 // AliyunQR 申请阿里云盘登录二维码。
 // POST /api/auth/aliyun/qr
 func (h *Handler) AliyunQR(c *gin.Context) {

@@ -29,35 +29,73 @@ const (
 
 // doJSON 发一个 JSON 请求并把响应解到 out；非 2xx 返回带响应体的错误。
 func (a *Aliyun) doJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
-	var rd io.Reader
+	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		rd = bytes.NewReader(b)
+		payload = b
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, rd)
-	if err != nil {
-		return err
+
+	// 阿里对高频调用会返回 429 TooManyRequests；对 429/408/5xx 指数退避重试，
+	// 比直接失败可靠得多（批量导入/遍历分享时尤其明显）。
+	const maxAttempts = 4
+	delay := 500 * time.Millisecond
+	var lastErr error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+			delay *= 2
+		}
+
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, rd)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := a.http.Do(req)
+		if err != nil {
+			lastErr = err // 网络抖动，重试
+			continue
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if out != nil && len(raw) > 0 {
+				return json.Unmarshal(raw, out)
+			}
+			return nil
+		}
+
+		lastErr = fmt.Errorf("阿里接口 %s 返回 %d: %s", url, resp.StatusCode, truncateBody(raw))
+		if !retryableStatus(resp.StatusCode) {
+			return lastErr // 其余 4xx 是请求本身的问题，重试无意义
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
+	return lastErr
+}
+
+// retryableStatus 判断该状态码是否值得退避重试（限流 / 超时 / 服务端错误）。
+func retryableStatus(code int) bool {
+	if code == http.StatusRequestTimeout || code == http.StatusTooManyRequests {
+		return true
 	}
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("阿里接口 %s 返回 %d: %s", url, resp.StatusCode, truncateBody(raw))
-	}
-	if out != nil && len(raw) > 0 {
-		return json.Unmarshal(raw, out)
-	}
-	return nil
+	return code >= 500
 }
 
 // currentRefreshToken 优先用库里(扫码写入)的 token，回退到配置。

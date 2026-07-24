@@ -274,3 +274,19 @@ export async function aliyunQRStatus(t: string, ck: string): Promise<string> {
   const d = await post<{ status: string }>("/auth/aliyun/qr/status", { t, ck });
   return d.status;
 }
+
+export interface OpenQRSession {
+  sid: string;
+  qrCodeUrl: string; // 待编码成二维码的授权地址
+}
+
+// 开放接口(原画直链)扫码授权 —— 阿里官方 OAuth，需服务端配了 client_id/secret。
+export function aliyunOpenQR(): Promise<OpenQRSession> {
+  return post<OpenQRSession>("/auth/aliyun/open/qr");
+}
+
+// 轮询开放接口扫码状态：WaitLogin / ScanSuccess / LoginSuccess / QRCodeExpired。
+export async function aliyunOpenQRStatus(sid: string): Promise<string> {
+  const d = await post<{ status: string }>("/auth/aliyun/open/qr/status", { sid });
+  return d.status;
+}

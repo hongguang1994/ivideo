@@ -217,7 +217,8 @@ func (a *Aliyun) walkShareByID(ctx context.Context, shareID, shareTok, parentID,
 	if depth > 30 { // 安全上限,防异常深度/循环挂载
 		return nil
 	}
-	items, err := a.listShareRetry(ctx, shareID, shareTok, parentID, 5)
+	// 重试退避已下沉到 doJSON（429/408/5xx 统一处理），这里直接调即可。
+	items, err := a.listShare(ctx, shareID, shareTok, parentID)
 	if err != nil {
 		return err
 	}
@@ -231,25 +232,6 @@ func (a *Aliyun) walkShareByID(ctx context.Context, shareID, shareTok, parentID,
 		*out = append(*out, cache.ShareEntry{Name: it.Name, Path: p, Size: it.Size})
 	}
 	return nil
-}
-
-// listShareRetry 列目录,遇 429/限流指数退避重试;非限流错误直接返回。
-func (a *Aliyun) listShareRetry(ctx context.Context, shareID, shareTok, parentID string, attempts int) ([]shareItem, error) {
-	delay := 600 * time.Millisecond
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		items, err := a.listShare(ctx, shareID, shareTok, parentID)
-		if err == nil {
-			return items, nil
-		}
-		lastErr = err
-		if !strings.Contains(err.Error(), "429") && !strings.Contains(err.Error(), "TooManyRequests") {
-			return nil, err
-		}
-		time.Sleep(delay)
-		delay *= 2
-	}
-	return nil, lastErr
 }
 
 // IsHLS 阿里的 DirectURL 返回的是转码 HLS 播放列表。

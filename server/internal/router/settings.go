@@ -13,4 +13,7 @@ func registerSettings(api *gin.RouterGroup, h *handlers.Handler) {
 	api.POST("/settings/token", h.SaveToken)
 	api.POST("/auth/aliyun/qr", h.AliyunQR)
 	api.POST("/auth/aliyun/qr/status", h.AliyunQRStatus)
+	// 开放接口(原画直链)扫码授权 —— 阿里官方 OAuth，需自备 client_id/secret
+	api.POST("/auth/aliyun/open/qr", h.AliyunOpenQR)
+	api.POST("/auth/aliyun/open/qr/status", h.AliyunOpenQRStatus)
 }

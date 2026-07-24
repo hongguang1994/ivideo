@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import {
+  aliyunOpenQR,
+  aliyunOpenQRStatus,
   aliyunQR,
   aliyunQRStatus,
   checkProvider,
@@ -83,11 +85,47 @@ export default function Settings() {
   };
 
   const qrText: Record<string, string> = {
+    // 网页版扫码
     NEW: "请用手机阿里云盘 App 扫码",
     SCANED: "已扫描，请在手机上确认",
     CONFIRMED: "✅ 授权成功！",
     EXPIRED: "二维码已过期，请重新获取",
     CANCELED: "已取消",
+    // 开放接口扫码
+    WaitLogin: "请用手机阿里云盘 App 扫码",
+    ScanSuccess: "已扫描，请在手机上确认",
+    LoginSuccess: "✅ 授权成功！原画直链可用了",
+    QRCodeExpired: "二维码已过期，请重新获取",
+  };
+
+  // 开放接口(原画直链)扫码授权：阿里官方 OAuth，服务端需配 client_id/secret。
+  const startOpenQR = async () => {
+    setError("");
+    setQrStatus("");
+    setQrDataUrl("");
+    stopPoll();
+    try {
+      const sess = await aliyunOpenQR();
+      setQrDataUrl(await QRCode.toDataURL(sess.qrCodeUrl, { width: 220, margin: 1 }));
+      setQrStatus("WaitLogin");
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const s = await aliyunOpenQRStatus(sess.sid);
+          setQrStatus(s);
+          if (s === "LoginSuccess") {
+            stopPoll();
+            loadProviders();
+          } else if (s === "QRCodeExpired") {
+            stopPoll();
+          }
+        } catch (e) {
+          setError(String((e as Error).message || e));
+          stopPoll();
+        }
+      }, 2000);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    }
   };
 
   const startAliyunQR = async () => {
@@ -202,6 +240,11 @@ export default function Settings() {
                 {p.provider === "aliyun" && (
                   <button className="primary" onClick={startAliyunQR}>
                     {p.authorized ? "重新授权" : "扫码授权"}
+                  </button>
+                )}
+                {p.authMethod === "token" && (
+                  <button className="primary" onClick={startOpenQR}>
+                    {p.authorized ? "重新扫码" : "扫码授权"}
                   </button>
                 )}
                 {p.authMethod === "cookie" && (
