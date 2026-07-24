@@ -20,9 +20,14 @@ db:
   dsn: ""                           # mysql 专用,如 user:pass@tcp(mysql:3306)/ivideo?charset=utf8mb4
 db_path: "/data/ivideo.db"          # SQLite 文件(driver=sqlite 时用)
 
-# 自动选流:阿里对**原画下载**限速(实测约 0.5MB/s ≈ 4 Mbps),但**转码预览流不限速**
-# (实测 52 Mbps)。所以码率高于阈值的片源自动改走转码流 —— 画质让一步,换来不卡。
-# 低码率片源(番剧、普通压制)仍走原画。0 = 关闭,一律按 strm.mode 走。
+# 自动选流:码率高于阈值的片源自动改走转码流(转码流不限速,实测 52 Mbps),
+# 低码率片源仍走原画。0 = 关闭,一律按 strm.mode 走。
+#
+# 阈值应设成「你的开放接口令牌能稳定跑到的速度」—— 阿里**按应用(client_id)限速**,
+# 同一台机器同一批文件实测:
+#   oplist·TV 版令牌     55~66 Mbps  → 阈值设 40,基本所有片都能走原画
+#   AList / oplist·OAuth2 约 4 Mbps  → 阈值设 3.5,只有低码率片能走原画
+# 默认按普通 OAuth2 保守取值;换上 TV 版令牌后记得调大。
 stream:
   original_max_mbps: 3.5
 

@@ -27,9 +27,11 @@ type Config struct {
 	//               而转码流约 3.7MB/s，故默认用 HLS 保证流畅。
 	//   original —— 原画直链。画质最好，适合开了会员/不限速的账号。
 	StrmMode string
-	// OriginalMaxMbps 是原画通道能稳定喂动的最大码率(Mbps)。
-	// 阿里对**原画下载**限速(实测约 0.5MB/s ≈ 4 Mbps)，但**转码预览流不限速**
-	// (实测 52 Mbps)。码率超过它的片源自动改走转码流，避免硬走原画卡成幻灯片。
+	// OriginalMaxMbps 是原画通道能稳定喂动的最大码率(Mbps)，
+	// 取决于开放接口令牌属于哪个阿里应用 —— 阿里**按 client_id 限速**：
+	//   oplist·TV 版        实测 55~66 Mbps
+	//   AList / oplist·OAuth2 实测约 4 Mbps
+	// 码率超过它的片源自动改走转码流(转码流不限速)，避免硬走原画卡成幻灯片。
 	// 0 = 关闭自动选流，一律按 StrmMode 走。
 	OriginalMaxMbps float64
 	// StrmAutoInterval 是 strm 媒体库定时兜底重建的间隔（分钟）。
