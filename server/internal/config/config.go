@@ -55,6 +55,11 @@ type Config struct {
 	AliyunOpenClientSecret string // 开放平台应用 client_secret
 	AliyunOpenTokenURL     string // 官方开放接口换 token 地址(填了自己的 client 时用)
 	AliyunOpenRenewURL     string // 在线 token 服务(默认 OpenList 的 api.oplist.org)
+	// AliyunOpenRenewStyle 是在线 token 服务的调用形态，取决于用哪一家：
+	//   oplist —— api.oplist.org，GET ?refresh_ui=&driver_txt=（默认）
+	//   alist  —— api.alistgo.com，POST {"grant_type","refresh_token"}
+	// 两家是各自注册的开放平台应用，阿里按 client_id 限速，换一家可能换到不同配额。
+	AliyunOpenRenewStyle string
 	// AliyunOpenConnectorURL 是本地 TV token 连接器(小雅的 aliyuntvtoken_connector)。
 	// oplist 的 TV 续期挂掉时作为回退。留空则不启用。
 	// ⚠️ 它会把 refresh token 转发给第三方 api.extscreen.com(明文 HTTP)。
@@ -157,6 +162,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("aliyun.open_client_secret", "")
 	v.SetDefault("aliyun.open_token_url", "https://openapi.alipan.com/oauth/access_token")
 	v.SetDefault("aliyun.open_renew_url", "https://api.oplist.org/alicloud/renewapi")
+	v.SetDefault("aliyun.open_renew_style", "oplist")
 	v.SetDefault("aliyun.open_connector_url", "")
 	v.SetDefault("aliyun.temp_folder_id", "root")
 	v.SetDefault("aliyun.drive_id", "")
@@ -214,6 +220,7 @@ func Load(cfgFile string) (Config, error) {
 		AliyunOpenClientSecret: v.GetString("aliyun.open_client_secret"),
 		AliyunOpenTokenURL:     v.GetString("aliyun.open_token_url"),
 		AliyunOpenRenewURL:     v.GetString("aliyun.open_renew_url"),
+		AliyunOpenRenewStyle:   v.GetString("aliyun.open_renew_style"),
 		AliyunOpenConnectorURL: v.GetString("aliyun.open_connector_url"),
 		AliyunTempFolderID:     v.GetString("aliyun.temp_folder_id"),
 		AliyunDriveID:          v.GetString("aliyun.drive_id"),

@@ -42,6 +42,7 @@ type Aliyun struct {
 	openClientSecret string
 	openTokenURL     string
 	openRenewURL     string
+	openRenewStyle   string // 在线 token 服务的调用形态：oplist(GET) / alist(POST JSON)
 	openConnectorURL string
 
 	// 各接口基础域名(端点路径在代码里拼接) + 伪装 UA
@@ -84,6 +85,7 @@ func NewAliyun(cfg config.Config, tokens TokenStore) *Aliyun {
 		openClientSecret: cfg.AliyunOpenClientSecret,
 		openTokenURL:     cfg.AliyunOpenTokenURL,
 		openRenewURL:     cfg.AliyunOpenRenewURL,
+		openRenewStyle:   cfg.AliyunOpenRenewStyle,
 		openConnectorURL: cfg.AliyunOpenConnectorURL,
 		apiBase:          cfg.AliyunAPIBase,
 		authBase:         cfg.AliyunAuthBase,

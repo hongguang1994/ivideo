@@ -190,6 +190,13 @@ func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
 	return nil
 }
 
+// 在线 token 中转服务的两种调用形态。两家用的是各自注册的开放平台应用，
+// 阿里按 client_id 限速，换一家有可能拿到不同的下载配额。
+const (
+	renewStyleOPList = "oplist" // api.oplist.org：GET ?refresh_ui=&driver_txt=
+	renewStyleAList  = "alist"  // api.alistgo.com：POST {"grant_type","refresh_token"}
+)
+
 // ---- 开放接口(取原画直链)----
 
 // openAccessToken 取开放接口 access token。
@@ -230,6 +237,14 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		}
 		if err := a.doJSON(ctx, a.openTokenURL, nil, body, &out); err != nil {
 			return "", fmt.Errorf("开放接口换 token 失败: %w", err)
+		}
+	} else if a.openRenewStyle == renewStyleAList {
+		// AList 的中转服务(api.alistgo.com)：POST JSON。
+		// 注意它和 oplist 是**两个不同的开放平台应用**，阿里按 client_id 限速，
+		// 所以换成它有可能拿到不同的下载配额 —— 值得实测。
+		body := map[string]string{"grant_type": "refresh_token", "refresh_token": rt}
+		if err := a.doJSON(ctx, a.openRenewURL, nil, body, &out); err != nil {
+			return "", fmt.Errorf("AList token 服务换 token 失败: %w", err)
 		}
 	} else {
 		// 在线 token 服务：GET ?refresh_ui=<rt>&server_use=true&driver_txt=alicloud_qr
