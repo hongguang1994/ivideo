@@ -27,6 +27,9 @@ type Config struct {
 	//               而转码流约 3.7MB/s，故默认用 HLS 保证流畅。
 	//   original —— 原画直链。画质最好，适合开了会员/不限速的账号。
 	StrmMode string
+	// StrmAutoInterval 是 strm 媒体库定时兜底重建的间隔（分钟）。
+	// 导入完成后会即时重建，这里只是覆盖「不经导入接口的资源变动」。<=0 表示只在启动时生成一次。
+	StrmAutoInterval int
 
 	// ---- 数据库 ----
 	DBDriver string // sqlite(默认) / mysql
@@ -131,6 +134,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("media_dir", "/media")
 	v.SetDefault("site_url", "http://localhost:8090")
 	v.SetDefault("strm.mode", "hls")
+	v.SetDefault("strm.auto_interval_minutes", 30)
 
 	v.SetDefault("db.driver", "sqlite")
 	v.SetDefault("db.dsn", "")
@@ -186,9 +190,10 @@ func Load(cfgFile string) (Config, error) {
 		JellyfinBaseURL:  strings.TrimRight(v.GetString("jellyfin.base_url"), "/"),
 		JellyfinAPIKey:   v.GetString("jellyfin.api_key"),
 
-		MediaDir: v.GetString("media_dir"),
-		SiteURL:  strings.TrimRight(v.GetString("site_url"), "/"),
-		StrmMode: v.GetString("strm.mode"),
+		MediaDir:         v.GetString("media_dir"),
+		SiteURL:          strings.TrimRight(v.GetString("site_url"), "/"),
+		StrmMode:         v.GetString("strm.mode"),
+		StrmAutoInterval: v.GetInt("strm.auto_interval_minutes"),
 
 		DBDriver:               v.GetString("db.driver"),
 		DBDSN:                  v.GetString("db.dsn"),

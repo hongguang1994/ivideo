@@ -44,6 +44,9 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 
 	h := handlers.New(cfg, ol, jf, st, cm)
 
+	// strm 媒体库自动维护：启动时生成一次 + 定时兜底（导入完成后也会即时触发）。
+	h.StartAutoStrm(cfg.StrmAutoInterval)
+
 	// 用 gin.New()（而非 gin.Default()），中间件栈由 router 显式装配，避免重复。
 	r := gin.New()
 	router.Register(r, h)

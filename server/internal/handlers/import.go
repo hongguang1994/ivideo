@@ -181,6 +181,11 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		}
 	}
 
+	// 导入即生成 strm：新资源立刻出现在 Jellyfin 媒体库里，不用再手动点一次。
+	if added > 0 {
+		h.autoGenerateStrm("import")
+	}
+
 	out := gin.H{"added": added, "skipped": skipped}
 	if len(errs) > 0 {
 		if len(errs) > 5 {

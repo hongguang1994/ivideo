@@ -22,6 +22,9 @@ db_path: "/data/ivideo.db"          # SQLite 文件(driver=sqlite 时用)
 
 strm:
   mode: "hls"                       # hls(转码,流畅) / original(原画,需不限速账号)
+  # strm 自动维护:导入完成后即时重建;这里是定时兜底间隔(分钟),覆盖不经导入接口的变动。
+  # 生成是幂等的(内容没变不重写、不动 mtime),不会惊动 Jellyfin 重扫。0=只在启动时生成一次。
+  auto_interval_minutes: 30
 
 openlist:
   base_url: "http://openlist:5244"

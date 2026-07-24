@@ -44,6 +44,7 @@ func printConfig(cfg config.Config) {
 	fmt.Println("  site_url              =", cfg.SiteURL)
 	fmt.Println("  media_dir             =", cfg.MediaDir)
 	fmt.Println("  strm.mode             =", cfg.StrmMode)
+	fmt.Println("  strm.auto_interval    =", cfg.StrmAutoInterval, "分钟")
 	fmt.Println("  openlist.base_url     =", cfg.OpenListBaseURL)
 	fmt.Println("  jellyfin.base_url     =", cfg.JellyfinBaseURL)
 	fmt.Println("  cache.backend         =", cfg.CacheBackend)
