@@ -19,11 +19,15 @@ import (
 
 // Result 是一次生成的统计。
 type Result struct {
-	Total   int      `json:"total"`   // 资源总数
-	Written int      `json:"written"` // 新建/更新的 strm 数
-	Removed int      `json:"removed"` // 清理掉的孤儿 strm 数
-	Errors  []string `json:"errors,omitempty"`
+	Total     int      `json:"total"`     // 资源总数
+	Written   int      `json:"written"`   // 实际写盘的 strm 数（新建或内容变了）
+	Unchanged int      `json:"unchanged"` // 内容没变、跳过没动的
+	Removed   int      `json:"removed"`   // 清理掉的孤儿 strm 数
+	Errors    []string `json:"errors,omitempty"`
 }
+
+// Changed 表示这轮生成是否真的动了媒体库 —— 只有动了才值得让 Jellyfin 重新扫库。
+func (r Result) Changed() bool { return r.Written > 0 || r.Removed > 0 }
 
 // Generator 生成 strm 媒体库。
 type Generator struct {
@@ -66,23 +70,28 @@ func (g *Generator) Generate() (Result, error) {
 	want := make(map[string]bool, len(resources))
 
 	for _, r := range resources {
-		rel, err := g.writeOne(r)
+		rel, changed, err := g.writeOne(r)
 		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("资源 %d(%s): %v", r.ID, r.Title, err))
 			continue
 		}
 		want[rel] = true
-		res.Written++
+		if changed {
+			res.Written++
+		} else {
+			res.Unchanged++
+		}
 	}
 
 	res.Removed = g.cleanOrphans(want)
-	slog.Info("strm 生成完成", "total", res.Total, "written", res.Written, "removed", res.Removed)
+	slog.Info("strm 生成完成", "total", res.Total,
+		"written", res.Written, "unchanged", res.Unchanged, "removed", res.Removed)
 	return res, nil
 }
 
-// writeOne 为单个资源写 strm，返回相对 mediaDir 的路径。
+// writeOne 为单个资源写 strm，返回相对 mediaDir 的路径，以及是否真的写了盘。
 // 结构：<媒体目录>/<标题>/<标题>.strm —— 符合 Jellyfin 电影目录约定。
-func (g *Generator) writeOne(r store.Resource) (string, error) {
+func (g *Generator) writeOne(r store.Resource) (rel string, changed bool, err error) {
 	name := sanitize(r.Title)
 	if name == "" {
 		name = fmt.Sprintf("resource-%d", r.ID)
@@ -92,7 +101,7 @@ func (g *Generator) writeOne(r store.Resource) (string, error) {
 
 	absDir := filepath.Join(g.mediaDir, relDir)
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	// hls 模式指向转码流(阿里对原画下载限速，转码流快得多)；original 指向原画直链。
@@ -104,12 +113,12 @@ func (g *Generator) writeOne(r store.Resource) (string, error) {
 
 	// 内容没变就不重写，避免无谓地改动 mtime 触发 Jellyfin 重扫。
 	if old, err := os.ReadFile(absFile); err == nil && string(old) == content {
-		return relFile, nil
+		return relFile, false, nil
 	}
 	if err := os.WriteFile(absFile, []byte(content), 0o644); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return relFile, nil
+	return relFile, true, nil
 }
 
 // cleanOrphans 删除不在 want 集合里的 strm（资源已删除的残留），并清理空目录。

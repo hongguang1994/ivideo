@@ -105,6 +105,7 @@ export function playResource(id: number): Promise<PlayResp> {
 export interface StrmResult {
   total: number;
   written: number;
+  unchanged: number;
   removed: number;
   errors?: string[];
   mediaDir: string;

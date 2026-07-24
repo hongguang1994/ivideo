@@ -20,14 +20,24 @@ func (h *Handler) generateStrm() (strm.Result, error) {
 }
 
 // autoGenerateStrm 在资源库变动后自动重建 strm，失败只记日志、不影响主流程。
+// 媒体库真的变了（有新写入或清理）才顺手让 Jellyfin 扫库 —— 新剧集才会出现。
 func (h *Handler) autoGenerateStrm(reason string) {
 	res, err := h.generateStrm()
 	if err != nil {
 		slog.Error("自动生成 strm 失败", "reason", reason, "err", err)
 		return
 	}
-	slog.Info("自动生成 strm", "reason", reason,
-		"total", res.Total, "written", res.Written, "removed", res.Removed)
+	slog.Info("自动生成 strm", "reason", reason, "total", res.Total,
+		"written", res.Written, "unchanged", res.Unchanged, "removed", res.Removed)
+
+	if !res.Changed() || h.jf == nil {
+		return
+	}
+	if err := h.jf.RefreshLibrary(); err != nil {
+		slog.Warn("通知 Jellyfin 扫库失败", "err", err)
+		return
+	}
+	slog.Info("已通知 Jellyfin 扫库", "reason", reason)
 }
 
 // StartAutoStrm 启动 strm 自动维护：启动时先生成一次，之后每 intervalMinutes 分钟兜底重建。
@@ -56,12 +66,13 @@ func (h *Handler) GenerateStrm(c *gin.Context) {
 		return
 	}
 	resp.OK(c, gin.H{
-		"total":    res.Total,
-		"written":  res.Written,
-		"removed":  res.Removed,
-		"errors":   res.Errors,
-		"mediaDir": h.cfg.MediaDir,
-		"siteUrl":  h.cfg.SiteURL,
-		"mode":     h.cfg.StrmMode,
+		"total":     res.Total,
+		"written":   res.Written,
+		"unchanged": res.Unchanged,
+		"removed":   res.Removed,
+		"errors":    res.Errors,
+		"mediaDir":  h.cfg.MediaDir,
+		"siteUrl":   h.cfg.SiteURL,
+		"mode":      h.cfg.StrmMode,
 	})
 }

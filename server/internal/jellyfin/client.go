@@ -119,6 +119,28 @@ func (c *Client) NowPlaying() ([]PlayingItem, error) {
 	return out, nil
 }
 
+// RefreshLibrary 触发 Jellyfin 扫描媒体库（异步，立即返回）。
+// strm 有新增/删除后调用，新剧集才会出现在库里。
+func (c *Client) RefreshLibrary() error {
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/Library/Refresh", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Emby-Token", c.apiKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("jellyfin: 扫库接口返回 %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 // getJSON 带 API Key 发起 GET 并解 JSON。
 func (c *Client) getJSON(path string, out any) error {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)

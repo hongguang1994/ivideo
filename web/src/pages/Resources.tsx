@@ -28,7 +28,7 @@ export default function Resources() {
     try {
       const r = await generateStrm();
       setStrmMsg(
-        `✅ 已生成 ${r.written}/${r.total} 个 strm,清理 ${r.removed} 个 · 目录 ${r.mediaDir} · 指向 ${r.siteUrl}`
+        `✅ 共 ${r.total} 个资源:新写 ${r.written},未变 ${r.unchanged},清理 ${r.removed} · 目录 ${r.mediaDir} · 指向 ${r.siteUrl}`
       );
     } catch (e) {
       setStrmMsg("");
