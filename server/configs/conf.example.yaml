@@ -57,13 +57,17 @@ aliyun:
   temp_folder_id: "root"            # 转存缓存的目标目录 file_id
   drive_id: ""                      # 留空自动取资源盘
   # 开放接口(取原画直链)
-  # 在线 token 中转服务。两家可选,各自是不同的开放平台应用 ——
-  # 阿里按 client_id 限速,换一家有可能换到不同的下载配额,值得实测。
-  #   oplist: url=https://api.oplist.org/alicloud/renewapi      style=oplist
-  #   alist : url=https://api.alistgo.com/alist/ali_open/token  style=alist
-  # (oplist 的 alicloud_tv 通道服务端已损坏,只有 alicloud_qr 可用)
-  open_renew_url: "https://api.oplist.org/alicloud/renewapi"
-  open_renew_style: "oplist"        # oplist(GET) / alist(POST JSON)
+  # 在线 token 中转服务。两家各自注册了不同的开放平台应用,而阿里是**按 client_id 限速**的,
+  # 换一家就是换配额 —— 实测差了一个数量级(同一文件、同一台机器):
+  #   alist  约 2~20 MB/s (16~158 Mbps)  ← 默认。够播蓝光原盘(12 Mbps)
+  #   oplist 约 0.5 MB/s  (4 Mbps)       ← 只够播普通压制,蓝光必卡
+  # 令牌来源:https://alistgo.com/tool/aliyundrive/request.html 扫码
+  # 注:oplist 的 alicloud_tv 通道服务端已损坏(返回"刷新Token失败"),只有 alicloud_qr 可用。
+  #     两家请求形态不同,换 url 时必须同步换 style。
+  #   oplist: url=https://api.oplist.org/alicloud/renewapi      style=oplist (GET)
+  #   alist : url=https://api.alistgo.com/alist/ali_open/token  style=alist  (POST JSON)
+  open_renew_url: "https://api.alistgo.com/alist/ali_open/token"
+  open_renew_style: "alist"
   open_connector_url: ""
   open_token_url: "https://openapi.alipan.com/oauth/access_token"
   open_client_id: ""

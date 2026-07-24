@@ -290,18 +290,30 @@ export default function Settings() {
       <div className="panel" style={{ maxWidth: 740, marginTop: 22 }}>
         <b>关于「开放接口(原画直链)」</b>
         <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: "8px 0 0" }}>
-          用于取<b>原画直链</b>。实测阿里<b>按应用限速</b>：TV版约 2.4MB/s，普通 OAuth2 约 0.48MB/s ——推荐{" "}
-          <b>TV版</b>。取 token：打开{" "}
+          用于取<b>原画直链</b>。阿里<b>按应用(client_id)限速</b>，所以令牌从哪家中转服务拿的，
+          直接决定你的下载速度 —— 同一文件实测：
+        </p>
+        <ul className="muted" style={{ fontSize: 13, lineHeight: 1.8, margin: "6px 0 0 18px" }}>
+          <li>
+            <b>AList</b> 约 2~20 MB/s（16~158 Mbps）—— 够播蓝光原盘，<b>推荐</b>
+          </li>
+          <li>OpenList(oplist) 约 0.5 MB/s（4 Mbps）—— 只够普通压制，蓝光会卡</li>
+        </ul>
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: "8px 0 0" }}>
+          取 token：打开{" "}
           <a
-            href="https://api.oplist.org"
+            href="https://alistgo.com/tool/aliyundrive/request.html"
             target="_blank"
             rel="noreferrer"
             style={{ color: "var(--accent-2)" }}
           >
-            api.oplist.org
+            alistgo.com 的取 token 工具
           </a>{" "}
-          → 选「阿里云盘 (Client) TV版扫码」→ 勾「使用 OpenList 提供的参数」→ 获取 Token → 扫码 → 复制
-          Refresh Token 粘到上面（类型选 TV版）。
+          → 扫码 → 复制 Refresh Token 粘到上面（类型选 OAuth2 扫码）。换中转服务需同步改配置
+          <code> aliyun.open_renew_url / open_renew_style</code>。
+        </p>
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.7, margin: "8px 0 0" }}>
+          注：oplist 的「TV版扫码」通道服务端已损坏（返回「刷新Token失败」），暂不可用。
         </p>
       </div>
     </div>
