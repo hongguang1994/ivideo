@@ -70,12 +70,14 @@ func (g *Generator) Generate() (Result, error) {
 	want := make(map[string]bool, len(resources))
 
 	for _, r := range resources {
-		rel, changed, err := g.writeOne(r)
+		rels, changed, err := g.writeOne(r)
 		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("资源 %d(%s): %v", r.ID, r.Title, err))
 			continue
 		}
-		want[rel] = true
+		for _, rel := range rels {
+			want[rel] = true
+		}
 		if changed {
 			res.Written++
 		} else {
@@ -89,13 +91,23 @@ func (g *Generator) Generate() (Result, error) {
 	return res, nil
 }
 
-// relPathFor 按解析出的媒体信息，算出 strm 的相对落盘路径（符合 Jellyfin 约定）：
+// layout 是一个资源在媒体库里应产出的文件集合。
+type layout struct {
+	strmRel    string // strm 相对路径
+	nfoRel     string // 同目录（电影）或剧根（剧集）的 NFO 路径，空表示不写
+	nfoContent string // NFO 内容
+}
+
+// planLayout 按解析出的媒体信息，规划 strm + NFO 的落盘路径（符合 Jellyfin 约定）：
 //
-//	电影：movies/<分类段...>/<片名> (年份)/<片名>.strm
+//	电影：movies/<片名> (年份)/<片名>.strm      —— **扁平**，不放分类子目录
 //	剧集：tv/<分类段...>/<剧名>/Season 0x/<剧名> S0xE0y.strm
 //
-// 分类段（题材/国别）原样保留成中间目录，Jellyfin 库内可按文件夹浏览。
-func (g *Generator) relPathFor(r store.Resource, info MediaInfo) string {
+// 为什么电影扁平而剧集嵌套：Jellyfin 电影扫描器**不会**把嵌套在额外分类
+// 子目录下的电影展示到主电影视图（实测 category/片名/片名.strm 认不出来），
+// 而剧集扫描器天生递归找 Season。所以电影的分类改用 **Genre 标签**（NFO）承载，
+// 在「类型」标签页浏览；剧集分类仍保留为可浏览的文件夹。
+func (g *Generator) planLayout(r store.Resource, info MediaInfo) layout {
 	cats := make([]string, 0, len(info.Categories))
 	for _, c := range info.Categories {
 		if s := sanitize(c); s != "" {
@@ -108,14 +120,19 @@ func (g *Generator) relPathFor(r store.Resource, info MediaInfo) string {
 		if show == "" {
 			show = fmt.Sprintf("resource-%d", r.ID)
 		}
+		showDir := filepath.Join(append(append([]string{"tv"}, cats...), show)...)
 		season := fmt.Sprintf("Season %02d", info.Season)
 		file := fmt.Sprintf("%s S%02dE%02d.strm", show, info.Season, info.Episode)
-		parts := append([]string{"tv"}, cats...)
-		parts = append(parts, show, season, file)
-		return filepath.Join(parts...)
+		lo := layout{strmRel: filepath.Join(showDir, season, file)}
+		// 剧根写一份 tvshow.nfo（多集共用、幂等），把分类也作为 Genre，便于「类型」筛选。
+		if len(cats) > 0 {
+			lo.nfoRel = filepath.Join(showDir, "tvshow.nfo")
+			lo.nfoContent = nfoXML("tvshow", show, cats)
+		}
+		return lo
 	}
 
-	// 电影
+	// 电影：扁平结构，分类进 Genre。
 	name := sanitize(info.Title)
 	if name == "" {
 		name = fmt.Sprintf("resource-%d", r.ID)
@@ -124,20 +141,42 @@ func (g *Generator) relPathFor(r store.Resource, info MediaInfo) string {
 	if info.Year > 0 {
 		folder = fmt.Sprintf("%s (%d)", name, info.Year)
 	}
-	parts := append([]string{"movies"}, cats...)
-	parts = append(parts, folder, name+".strm")
-	return filepath.Join(parts...)
+	dir := filepath.Join("movies", folder)
+	lo := layout{strmRel: filepath.Join(dir, name+".strm")}
+	if len(cats) > 0 {
+		lo.nfoRel = filepath.Join(dir, name+".nfo")
+		lo.nfoContent = nfoXML("movie", name, cats)
+	}
+	return lo
 }
 
-// writeOne 为单个资源写 strm，返回相对 mediaDir 的路径，以及是否真的写了盘。
-// 目录结构由 file_path 解析出的分类信息决定（见 relPathFor）。
-func (g *Generator) writeOne(r store.Resource) (rel string, changed bool, err error) {
-	info := ParsePath(r.FilePath, r.Title)
-	relFile := g.relPathFor(r, info)
+// nfoXML 生成最小 NFO：标题 + 分类作为流派。root 为 movie / tvshow。
+func nfoXML(root, title string, genres []string) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n")
+	b.WriteString("<" + root + ">\n")
+	b.WriteString("  <title>" + xmlEscape(title) + "</title>\n")
+	for _, gr := range genres {
+		b.WriteString("  <genre>" + xmlEscape(gr) + "</genre>\n")
+	}
+	b.WriteString("</" + root + ">\n")
+	return b.String()
+}
 
-	absDir := filepath.Join(g.mediaDir, filepath.Dir(relFile))
+func xmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+	return r.Replace(s)
+}
+
+// writeOne 为单个资源写 strm（及可选 NFO），返回本轮它拥有的所有相对路径、
+// 以及 strm 是否真的写了盘。目录结构由 file_path 解析出的分类信息决定（见 planLayout）。
+func (g *Generator) writeOne(r store.Resource) (rels []string, changed bool, err error) {
+	info := ParsePath(r.FilePath, r.Title)
+	lo := g.planLayout(r, info)
+
+	absDir := filepath.Join(g.mediaDir, filepath.Dir(lo.strmRel))
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
-		return "", false, err
+		return nil, false, err
 	}
 
 	// hls 模式指向转码流(阿里对原画下载限速，转码流快得多)；original 指向原画直链。
@@ -145,16 +184,34 @@ func (g *Generator) writeOne(r store.Resource) (rel string, changed bool, err er
 	if g.mode == "original" {
 		content = fmt.Sprintf("%s%s/file/%d%s", g.siteURL, g.apiPrefix, r.ID, ext(r.FilePath))
 	}
-	absFile := filepath.Join(g.mediaDir, relFile)
+	changed, err = writeIfChanged(filepath.Join(g.mediaDir, lo.strmRel), content)
+	if err != nil {
+		return nil, false, err
+	}
+	rels = append(rels, lo.strmRel)
 
-	// 内容没变就不重写，避免无谓地改动 mtime 触发 Jellyfin 重扫。
-	if old, err := os.ReadFile(absFile); err == nil && string(old) == content {
-		return relFile, false, nil
+	// NFO（分类→Genre）。剧集是剧根共用一份，多集重复写但内容相同、幂等。
+	if lo.nfoRel != "" {
+		if _, err := writeIfChanged(filepath.Join(g.mediaDir, lo.nfoRel), lo.nfoContent); err != nil {
+			return nil, false, err
+		}
+		rels = append(rels, lo.nfoRel)
 	}
-	if err := os.WriteFile(absFile, []byte(content), 0o644); err != nil {
-		return "", false, err
+	return rels, changed, nil
+}
+
+// writeIfChanged 写文件，内容没变则跳过（不动 mtime，避免无谓触发 Jellyfin 重扫）。
+func writeIfChanged(absPath, content string) (changed bool, err error) {
+	if old, err := os.ReadFile(absPath); err == nil && string(old) == content {
+		return false, nil
 	}
-	return relFile, true, nil
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // cleanOrphans 删除不在 want 集合里的 strm（资源已删除的残留），并清理空目录。
@@ -164,7 +221,8 @@ func (g *Generator) cleanOrphans(want map[string]bool) int {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(path), ".strm") {
+		e := strings.ToLower(filepath.Ext(path))
+		if e != ".strm" && e != ".nfo" {
 			return nil
 		}
 		rel, rerr := filepath.Rel(g.mediaDir, path)
