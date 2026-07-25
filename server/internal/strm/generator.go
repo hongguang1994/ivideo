@@ -129,17 +129,16 @@ func (g *Generator) planLayout(r store.Resource, info MediaInfo) layout {
 		return lo
 	}
 
-	// 剧集 / 动漫：<库>/<国家>/<剧名>/Season 0x/...，国家作为可浏览文件夹。
+	// 剧集 / 动漫：<库>/<剧名>/Season 0x/...
+	// 剧名必须是库根的直接子目录 —— Jellyfin 把库根下第一层文件夹直接当成一部剧，
+	// 中间再套「国家」目录会让它把国家名当成剧名去刮削（实测 anime/美国/... 被刮成
+	// 「美国老爹」）。所以国家和电影一样只进 NFO 的 <tag>，不做文件夹层。
 	root := string(info.Library()) // "tv" 或 "anime"
 	show := sanitize(info.Title)
 	if show == "" {
 		show = fmt.Sprintf("resource-%d", r.ID)
 	}
-	parts := []string{root}
-	if country != "" {
-		parts = append(parts, country)
-	}
-	showDir := filepath.Join(append(parts, show)...)
+	showDir := filepath.Join(root, show)
 	season := fmt.Sprintf("Season %02d", info.Season)
 	file := fmt.Sprintf("%s S%02dE%02d.strm", show, info.Season, info.Episode)
 	lo := layout{strmRel: filepath.Join(showDir, season, file)}
