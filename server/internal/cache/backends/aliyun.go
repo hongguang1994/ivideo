@@ -60,6 +60,11 @@ type Aliyun struct {
 	openTok   string
 	openExp   time.Time
 
+	// openRefreshMu 单飞锁：开放接口令牌刷新时同一时刻只允许一个在跑。
+	// TV/开放令牌的 refresh_token 用一次就轮换，并发刷新会各自拿同一个旧 rt，
+	// 一个成功轮换后其余 rt 立即作废 → 令牌链断裂、之后全部“刷新Token失败”。
+	openRefreshMu sync.Mutex
+
 	// 分享目录列表缓存：同一目录短时间内重复列取直接命中，
 	// 明显减少阿里调用（浏览/导入时最有效），也就更不容易触发 429。
 	listMu    sync.Mutex
@@ -326,6 +331,28 @@ func (a *Aliyun) VideoDurationSeconds(ctx context.Context, cachePath string) (fl
 		return 0, err
 	}
 	return a.videoDuration(ctx, accessTok, cachePath)
+}
+
+// RefreshTokens 主动预热/续期令牌（web + 开放接口）。各自有单飞锁+缓存，
+// 未过期则命中缓存不真刷，所以可被定时器安全地反复调用来保活令牌链。
+func (a *Aliyun) RefreshTokens(ctx context.Context) error {
+	var errs []string
+	if _, err := a.webToken(ctx); err != nil {
+		errs = append(errs, "web: "+err.Error())
+	}
+	hasOpen := a.openRT != ""
+	if a.tokens != nil && a.tokens.GetToken("aliyun_open") != "" {
+		hasOpen = true
+	}
+	if hasOpen {
+		if _, err := a.openAccessToken(ctx); err != nil {
+			errs = append(errs, "open: "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // Delete 删除已转存文件（进回收站）。

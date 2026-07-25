@@ -47,6 +47,29 @@ func (m *Manager) SetOriginalMaxMbps(v float64) { m.originalMaxMbps = v }
 // SetSessionSource 注入会话源（如 Jellyfin），启用"停了才删、暂停不删"。
 func (m *Manager) SetSessionSource(s SessionSource) { m.sessions = s }
 
+// StartTokenRefresh 启动令牌保活定时器：每 intervalMinutes 分钟主动预热一次令牌，
+// 让 access_token 在快过期前续上、refresh_token 链保持活跃（避免闲置失效）。
+// 适配器需实现 TokenRefresher；未实现或 interval<=0 则不启用。
+func (m *Manager) StartTokenRefresh(intervalMinutes int) {
+	r, ok := m.backend.(TokenRefresher)
+	if !ok || intervalMinutes <= 0 {
+		return
+	}
+	if err := r.RefreshTokens(context.Background()); err != nil { // 启动即预热一次
+		slog.Warn("令牌预热失败", "err", err)
+	}
+	go func() {
+		t := time.NewTicker(time.Duration(intervalMinutes) * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			if err := r.RefreshTokens(context.Background()); err != nil {
+				slog.Warn("令牌定时刷新失败", "err", err)
+			}
+		}
+	}()
+	slog.Info("已启用令牌保活定时器", "间隔分钟", intervalMinutes)
+}
+
 // EnsureReady 确保某资源已转存。
 // 已就绪则刷新访问时间并返回；否则**非阻塞**地触发后台转存，返回当前状态（转存中）。
 func (m *Manager) EnsureReady(resourceID int64) (store.CacheItem, error) {

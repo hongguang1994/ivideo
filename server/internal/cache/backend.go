@@ -86,6 +86,12 @@ type MediaProber interface {
 	VideoDurationSeconds(ctx context.Context, cachePath string) (float64, error)
 }
 
+// TokenRefresher 是可选能力：主动预热/续期令牌，保持令牌链活跃。
+// 实现应“未过期则命中缓存、不真刷”，从而定时调用是安全的。
+type TokenRefresher interface {
+	RefreshTokens(ctx context.Context) error
+}
+
 // TokenVerifier 是可选能力：实测校验某类凭据当前是否有效(会真的向网盘发一次请求)。
 // provider 取 "aliyun"(网页版 token)/ "aliyun_open"(开放接口 token)等。
 type TokenVerifier interface {

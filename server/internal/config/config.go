@@ -50,6 +50,7 @@ type Config struct {
 	CacheTTLHours      int    // 超过多久没看就清理
 	CacheCleanInterval int    // 清理任务间隔（分钟）
 	CacheStopGrace     int    // 停止播放后多久删（分钟，会话感知）
+	TokenRefreshMin    int    // 令牌保活定时刷新间隔（分钟，0=关闭）
 
 	// ---- 分享导入 ----
 	ImportMaxDepth int // 导入分享时最大递归深度
@@ -159,6 +160,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.ttl_hours", 72)
 	v.SetDefault("cache.clean_interval_minutes", 10)
 	v.SetDefault("cache.stop_grace_minutes", 10)
+	v.SetDefault("cache.token_refresh_minutes", 30)
 
 	v.SetDefault("aliyun.list_cache_seconds", 60)
 
@@ -219,6 +221,7 @@ func Load(cfgFile string) (Config, error) {
 		CacheMaxBytes:          v.GetInt64("cache.max_bytes"),
 		CacheTTLHours:          v.GetInt("cache.ttl_hours"),
 		CacheStopGrace:         v.GetInt("cache.stop_grace_minutes"),
+		TokenRefreshMin:        v.GetInt("cache.token_refresh_minutes"),
 		AliyunListCacheSeconds: v.GetInt("aliyun.list_cache_seconds"),
 		ImportMaxDepth:         v.GetInt("import.max_depth"),
 		ImportMaxFiles:         v.GetInt("import.max_files"),

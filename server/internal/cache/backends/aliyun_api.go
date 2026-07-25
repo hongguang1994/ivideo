@@ -233,6 +233,18 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 	}
 	a.mu.Unlock()
 
+	// 单飞：同一时刻只允许一个刷新在跑，其余请求在此排队。拿到锁后再复查一次缓存
+	// —— 排队期间别的请求可能已经刷好了，直接复用，避免重复刷新把轮换令牌搞断。
+	a.openRefreshMu.Lock()
+	defer a.openRefreshMu.Unlock()
+	a.mu.Lock()
+	if a.openTok != "" && time.Now().Before(a.openExp) {
+		tok := a.openTok
+		a.mu.Unlock()
+		return tok, nil
+	}
+	a.mu.Unlock()
+
 	rt := a.openRT
 	if a.tokens != nil {
 		if t := a.tokens.GetToken("aliyun_open"); t != "" {

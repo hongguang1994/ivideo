@@ -56,6 +56,10 @@ cache:
   # 会话感知清理:配了 jellyfin.api_key 后,正在播放/暂停的不删,
   # 停止播放且过了这个宽限期(分钟)才删 —— "停了才删,暂停不删"。
   stop_grace_minutes: 10
+  # 令牌保活:定时主动预热令牌(web+开放接口),让 access_token 快过期前续上、
+  # refresh_token 链保持活跃,避免闲置失效;也让第一次播放不用等刷新。
+  # 有单飞锁保证不会并发刷新把会轮换的 TV 令牌搞断。0=关闭。
+  token_refresh_minutes: 30
 
 # 分享导入(ImportShare):遍历分享把视频建成资源
 import:
