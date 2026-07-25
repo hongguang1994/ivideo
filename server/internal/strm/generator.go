@@ -100,64 +100,66 @@ type layout struct {
 
 // planLayout 按解析出的媒体信息，规划 strm + NFO 的落盘路径（符合 Jellyfin 约定）：
 //
-//	电影：movies/<片名> (年份)/<片名>.strm      —— **扁平**，不放分类子目录
-//	剧集：tv/<分类段...>/<剧名>/Season 0x/<剧名> S0xE0y.strm
+//	电影：movies/<片名> (年份)/<片名>.strm                 —— **扁平**（电影库不认嵌套目录）
+//	剧集：tv/<国家>/<剧名>/Season 0x/<剧名> S0xE0y.strm
+//	动漫：anime/<国家>/<剧名>/Season 0x/<剧名> S0xE0y.strm
 //
-// 为什么电影扁平而剧集嵌套：Jellyfin 电影扫描器**不会**把嵌套在额外分类
-// 子目录下的电影展示到主电影视图（实测 category/片名/片名.strm 认不出来），
-// 而剧集扫描器天生递归找 Season。所以电影的分类改用 **Genre 标签**（NFO）承载，
-// 在「类型」标签页浏览；剧集分类仍保留为可浏览的文件夹。
+// 顶层大类（电影/剧集/动漫）由 info.Library() 决定，各对应一个 Jellyfin 库。
+// 国家这一层：剧集/动漫用文件夹（可钻），电影用 NFO 的 <tag>（电影库不认嵌套）。
+// 分类只承载「国家」这一个人工维度；Genre 留空，交给在线刮削填真实类型。
 func (g *Generator) planLayout(r store.Resource, info MediaInfo) layout {
-	cats := make([]string, 0, len(info.Categories))
-	for _, c := range info.Categories {
-		if s := sanitize(c); s != "" {
-			cats = append(cats, s)
-		}
-	}
+	country := sanitize(info.Country())
 
-	if info.Kind == KindEpisode {
-		show := sanitize(info.Title)
-		if show == "" {
-			show = fmt.Sprintf("resource-%d", r.ID)
+	// 电影：扁平结构，国家进 NFO tag。
+	if info.Library() == LibMovies {
+		name := sanitize(info.Title)
+		if name == "" {
+			name = fmt.Sprintf("resource-%d", r.ID)
 		}
-		showDir := filepath.Join(append(append([]string{"tv"}, cats...), show)...)
-		season := fmt.Sprintf("Season %02d", info.Season)
-		file := fmt.Sprintf("%s S%02dE%02d.strm", show, info.Season, info.Episode)
-		lo := layout{strmRel: filepath.Join(showDir, season, file)}
-		// 剧根写一份 tvshow.nfo（多集共用、幂等），把分类也作为 Genre，便于「类型」筛选。
-		if len(cats) > 0 {
-			lo.nfoRel = filepath.Join(showDir, "tvshow.nfo")
-			lo.nfoContent = nfoXML("tvshow", show, cats)
+		folder := name
+		if info.Year > 0 {
+			folder = fmt.Sprintf("%s (%d)", name, info.Year)
+		}
+		dir := filepath.Join("movies", folder)
+		lo := layout{strmRel: filepath.Join(dir, name+".strm")}
+		if country != "" {
+			lo.nfoRel = filepath.Join(dir, name+".nfo")
+			lo.nfoContent = nfoTags("movie", country)
 		}
 		return lo
 	}
 
-	// 电影：扁平结构，分类进 Genre。
-	name := sanitize(info.Title)
-	if name == "" {
-		name = fmt.Sprintf("resource-%d", r.ID)
+	// 剧集 / 动漫：<库>/<国家>/<剧名>/Season 0x/...，国家作为可浏览文件夹。
+	root := string(info.Library()) // "tv" 或 "anime"
+	show := sanitize(info.Title)
+	if show == "" {
+		show = fmt.Sprintf("resource-%d", r.ID)
 	}
-	folder := name
-	if info.Year > 0 {
-		folder = fmt.Sprintf("%s (%d)", name, info.Year)
+	parts := []string{root}
+	if country != "" {
+		parts = append(parts, country)
 	}
-	dir := filepath.Join("movies", folder)
-	lo := layout{strmRel: filepath.Join(dir, name+".strm")}
-	if len(cats) > 0 {
-		lo.nfoRel = filepath.Join(dir, name+".nfo")
-		lo.nfoContent = nfoXML("movie", name, cats)
+	showDir := filepath.Join(append(parts, show)...)
+	season := fmt.Sprintf("Season %02d", info.Season)
+	file := fmt.Sprintf("%s S%02dE%02d.strm", show, info.Season, info.Episode)
+	lo := layout{strmRel: filepath.Join(showDir, season, file)}
+	if country != "" {
+		lo.nfoRel = filepath.Join(showDir, "tvshow.nfo")
+		lo.nfoContent = nfoTags("tvshow", country)
 	}
 	return lo
 }
 
-// nfoXML 生成最小 NFO：标题 + 分类作为流派。root 为 movie / tvshow。
-func nfoXML(root, title string, genres []string) string {
+// nfoTags 生成只含标签的最小 NFO（root 为 movie / tvshow）。
+// 只写 <tag>（国家等人工分类维度）；Genre/海报/演员等留给在线刮削补全。
+func nfoTags(root string, tags ...string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n")
 	b.WriteString("<" + root + ">\n")
-	b.WriteString("  <title>" + xmlEscape(title) + "</title>\n")
-	for _, gr := range genres {
-		b.WriteString("  <genre>" + xmlEscape(gr) + "</genre>\n")
+	for _, t := range tags {
+		if t != "" {
+			b.WriteString("  <tag>" + xmlEscape(t) + "</tag>\n")
+		}
 	}
 	b.WriteString("</" + root + ">\n")
 	return b.String()
