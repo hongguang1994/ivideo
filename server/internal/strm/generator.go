@@ -89,17 +89,53 @@ func (g *Generator) Generate() (Result, error) {
 	return res, nil
 }
 
-// writeOne 为单个资源写 strm，返回相对 mediaDir 的路径，以及是否真的写了盘。
-// 结构：<媒体目录>/<标题>/<标题>.strm —— 符合 Jellyfin 电影目录约定。
-func (g *Generator) writeOne(r store.Resource) (rel string, changed bool, err error) {
-	name := sanitize(r.Title)
+// relPathFor 按解析出的媒体信息，算出 strm 的相对落盘路径（符合 Jellyfin 约定）：
+//
+//	电影：movies/<分类段...>/<片名> (年份)/<片名>.strm
+//	剧集：tv/<分类段...>/<剧名>/Season 0x/<剧名> S0xE0y.strm
+//
+// 分类段（题材/国别）原样保留成中间目录，Jellyfin 库内可按文件夹浏览。
+func (g *Generator) relPathFor(r store.Resource, info MediaInfo) string {
+	cats := make([]string, 0, len(info.Categories))
+	for _, c := range info.Categories {
+		if s := sanitize(c); s != "" {
+			cats = append(cats, s)
+		}
+	}
+
+	if info.Kind == KindEpisode {
+		show := sanitize(info.Title)
+		if show == "" {
+			show = fmt.Sprintf("resource-%d", r.ID)
+		}
+		season := fmt.Sprintf("Season %02d", info.Season)
+		file := fmt.Sprintf("%s S%02dE%02d.strm", show, info.Season, info.Episode)
+		parts := append([]string{"tv"}, cats...)
+		parts = append(parts, show, season, file)
+		return filepath.Join(parts...)
+	}
+
+	// 电影
+	name := sanitize(info.Title)
 	if name == "" {
 		name = fmt.Sprintf("resource-%d", r.ID)
 	}
-	relDir := name
-	relFile := filepath.Join(relDir, name+".strm")
+	folder := name
+	if info.Year > 0 {
+		folder = fmt.Sprintf("%s (%d)", name, info.Year)
+	}
+	parts := append([]string{"movies"}, cats...)
+	parts = append(parts, folder, name+".strm")
+	return filepath.Join(parts...)
+}
 
-	absDir := filepath.Join(g.mediaDir, relDir)
+// writeOne 为单个资源写 strm，返回相对 mediaDir 的路径，以及是否真的写了盘。
+// 目录结构由 file_path 解析出的分类信息决定（见 relPathFor）。
+func (g *Generator) writeOne(r store.Resource) (rel string, changed bool, err error) {
+	info := ParsePath(r.FilePath, r.Title)
+	relFile := g.relPathFor(r, info)
+
+	absDir := filepath.Join(g.mediaDir, filepath.Dir(relFile))
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
 		return "", false, err
 	}
