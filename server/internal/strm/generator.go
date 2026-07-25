@@ -110,15 +110,16 @@ type layout struct {
 func (g *Generator) planLayout(r store.Resource, info MediaInfo) layout {
 	country := sanitize(info.Country())
 
-	// 电影：扁平结构，国家进 NFO tag。
+	// 电影：扁平结构 + 清理片名（剥技术标记，让 TMDB 刮得中），国家进 NFO tag。
 	if info.Library() == LibMovies {
-		name := sanitize(info.Title)
+		cleanName, cleanYear := CleanMovieTitle(info.Title)
+		name := sanitize(cleanName)
 		if name == "" {
 			name = fmt.Sprintf("resource-%d", r.ID)
 		}
 		folder := name
-		if info.Year > 0 {
-			folder = fmt.Sprintf("%s (%d)", name, info.Year)
+		if cleanYear > 0 {
+			folder = fmt.Sprintf("%s (%d)", name, cleanYear)
 		}
 		dir := filepath.Join("movies", folder)
 		lo := layout{strmRel: filepath.Join(dir, name+".strm")}
