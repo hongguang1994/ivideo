@@ -76,8 +76,8 @@ func isTechToken(w string) bool {
 func pickChineseHead(words []string) string {
 	var head []string
 	for _, w := range words {
-		if reYearWord.MatchString(w) {
-			break // 独立年份词是标题的结束标志
+		if reYearWord.MatchString(w) || isTechToken(w) {
+			break // 年份词 / 技术标记词（含「国语1080P」这类含中文的）是标题结束标志
 		}
 		if hasCJK(w) || !hasLatinLetter(w) {
 			head = append(head, w)
