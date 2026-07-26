@@ -14,7 +14,10 @@ func New(cfg config.Config, tokens TokenStore) (cache.CacheBackend, error) {
 	case "fake", "":
 		return NewFake(), nil
 	case "aliyun":
-		return NewAliyun(cfg, tokens), nil
+		// 阿里为默认盘 + 115 并存（115 无令牌时休眠，播到 115 资源才用）。
+		ali := NewAliyun(cfg, tokens)
+		p115 := NewPan115(cfg, tokens)
+		return NewDispatcher(ali, map[string]cache.CacheBackend{"115": p115}), nil
 	default:
 		return nil, fmt.Errorf("未知缓存盘适配器: %s", cfg.CacheBackend)
 	}
