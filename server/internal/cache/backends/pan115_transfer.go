@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -51,6 +52,29 @@ func parseShareCode(shareURL, pwd string) (shareCode, receiveCode string) {
 // isPan115Share 判断是否是 115 分享链接。
 func isPan115Share(shareURL string) bool {
 	return strings.Contains(shareURL, "115cdn.com/s/") || strings.Contains(shareURL, "115.com/s/")
+}
+
+// keepAliveCookie 用 cookie 轻量访问一次网页接口，保持登录态活跃、尽量延长 cookie 寿命。
+// 由令牌保活定时器周期调用。失败（cookie 过期/风控）只记日志，不影响 open token。
+func (p *Pan115) keepAliveCookie(ctx context.Context) {
+	ck := p.webCookie()
+	if ck == "" {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		pan115Web+"/files?aid=1&cid=0&offset=0&limit=1", nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", Pan115UA)
+	req.Header.Set("Cookie", ck)
+	resp, err := p.http.Do(req)
+	if err != nil {
+		slog.Warn("115 cookie 保活请求失败", "err", err)
+		return
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 type pan115SnapItem struct {

@@ -189,6 +189,7 @@ func (p *Pan115) Verify(ctx context.Context, provider string) error {
 
 // RefreshTokens 令牌保活（供定时器调用；未过期命中缓存不真刷）。
 func (p *Pan115) RefreshTokens(ctx context.Context) error {
+	p.keepAliveCookie(ctx) // 有 cookie 就 ping 一下保活
 	if p.tokens == nil || p.tokens.GetToken("115") == "" {
 		return nil
 	}
