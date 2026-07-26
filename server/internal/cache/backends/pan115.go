@@ -199,6 +199,15 @@ func (p *Pan115) RefreshTokens(ctx context.Context) error {
 // Transfer 对 115 是 no-op：115 开放平台没有「转存他人分享」，文件须已在你自己盘里
 // （你在 115 App 手动转存、再经导入建成资源）。这里把导入时记录的 pick_code 当缓存路径返回。
 func (p *Pan115) Transfer(ctx context.Context, share cache.ShareRef) (cache.TransferResult, error) {
+	// 分享资源：网页版 cookie 转存到自己盘，返回转存后文件的 pick_code。
+	if isPan115Share(share.ShareURL) {
+		pc, size, err := p.receiveShareFile(ctx, share.ShareURL, share.SharePwd, share.FilePath)
+		if err != nil {
+			return cache.TransferResult{}, err
+		}
+		return cache.TransferResult{CachePath: pc, Size: size}, nil
+	}
+	// 否则视为「文件已在自己盘」：FilePath 直接是 pick_code。
 	pickCode := strings.TrimSpace(share.FilePath)
 	if pickCode == "" {
 		return cache.TransferResult{}, fmt.Errorf("115 资源缺少 pick_code")
