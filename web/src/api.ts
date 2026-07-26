@@ -291,3 +291,21 @@ export async function aliyunOpenQRStatus(sid: string): Promise<string> {
   const d = await post<{ status: string }>("/auth/aliyun/open/qr/status", { sid });
   return d.status;
 }
+
+// 115 网页扫码登录会话（拿网页态 cookie，用于转存分享）。
+export interface Pan115Session {
+  uid: string;
+  time: number;
+  sign: string;
+  qrcode: string; // 待编码成二维码的扫码地址
+}
+
+export function pan115QR(): Promise<Pan115Session> {
+  return post<Pan115Session>("/auth/115/qr");
+}
+
+// 轮询 115 扫码状态：0 等待 / 1 已扫 / 2 已确认 / 负数 过期。
+export async function pan115QRStatus(s: Pan115Session): Promise<number> {
+  const d = await post<{ status: number }>("/auth/115/qr/status", s);
+  return d.status;
+}
