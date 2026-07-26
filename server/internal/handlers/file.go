@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -18,7 +19,7 @@ import (
 // FileGateway 是给 Emby/Jellyfin(strm) 用的「伪文件」入口:
 //
 //	strm 内容写 http://<ivideo>/api/file/<资源ID>.mkv
-//	GET  → 302 跳到原画直链(开放接口取,支持 Range,画质最好)
+//	GET  → 302 跳到原画直链(阿里)，或代理转发(115，UA 绑定不能 302)
 //	HEAD → 只回元信息,**不触发转存**(防止扫描媒体库把所有资源都转存一遍)
 func (h *Handler) FileGateway(c *gin.Context) {
 	name := c.Param("name")
@@ -59,6 +60,13 @@ func (h *Handler) FileGateway(c *gin.Context) {
 	c.Header("X-Stream-Kind", string(res.Kind)) // original / hls：让外部看到实际给了哪种流
 	slog.Info("播放解析", "resource", id, "kind", res.Kind, "size", res.Item.Size)
 
+	// 115 直链是 UA 绑定的：播放器拿自己的 UA 去 302 目标会被 403。
+	// 所以 115 资源不 302，由 ivideo 用取直链时的同一 UA 拉流、透传 Range 后转发。
+	if strings.HasPrefix(res.Item.CachePath, "115:") {
+		h.proxyStream115(c, res.URL)
+		return
+	}
+
 	// 被自动降级成转码流时，跳到**我们自己的** HLS 入口而不是阿里的裸 m3u8 ——
 	// 分片要经本服务代理才能取到，这条链路也是既有的、验证过的。
 	if res.Kind == cache.KindHLS {
@@ -66,4 +74,38 @@ func (h *Handler) FileGateway(c *gin.Context) {
 		return
 	}
 	c.Redirect(http.StatusFound, res.URL)
+}
+
+// pan115UA 必须与 pan115 取直链时用的 UA 完全一致（115 直链绑定该 UA）。
+const pan115UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
+
+var proxyClient = &http.Client{} // 流式转发，不设整体超时
+
+// proxyStream115 用固定 UA 拉上游直链并流式转发给客户端，透传 Range/关键响应头。
+// 专用于 115 这类 UA 绑定、不能 302 直跳的直链（与 handlers.go 里不带 UA 的
+// proxyStream 区分开，避免影响 OpenList/Jellyfin 那条既有链路）。
+func (h *Handler) proxyStream115(c *gin.Context, upstream string) {
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, upstream, nil)
+	if err != nil {
+		resp.Fail(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	req.Header.Set("User-Agent", pan115UA)
+	if rng := c.GetHeader("Range"); rng != "" {
+		req.Header.Set("Range", rng) // 透传 Range，支持拖动/分段
+	}
+	up, err := proxyClient.Do(req)
+	if err != nil {
+		resp.Fail(c, http.StatusBadGateway, "115 拉流失败: "+err.Error())
+		return
+	}
+	defer up.Body.Close()
+
+	for _, hk := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"} {
+		if v := up.Header.Get(hk); v != "" {
+			c.Header(hk, v)
+		}
+	}
+	c.Status(up.StatusCode)
+	_, _ = io.Copy(c.Writer, up.Body)
 }
