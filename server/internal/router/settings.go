@@ -16,4 +16,8 @@ func registerSettings(api *gin.RouterGroup, h *handlers.Handler) {
 	// 开放接口(原画直链)扫码授权 —— 阿里官方 OAuth，需自备 client_id/secret
 	api.POST("/auth/aliyun/open/qr", h.AliyunOpenQR)
 	api.POST("/auth/aliyun/open/qr/status", h.AliyunOpenQRStatus)
+
+	// 115 网页扫码登录 —— 拿网页态 cookie，用于转存分享
+	api.POST("/auth/115/qr", h.Pan115QR)
+	api.POST("/auth/115/qr/status", h.Pan115QRStatus)
 }
