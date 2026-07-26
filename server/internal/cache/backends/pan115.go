@@ -43,16 +43,17 @@ type Pan115 struct {
 	refreshMu sync.Mutex
 }
 
+// Pan115UA 是取直链和播放代理拉流必须共用的固定 UA。
+// 115 直链绑定「请求直链时的 UA」，取链与拉流两处必须完全一致，否则 403。
+// 故这里用固定值、不读配置（配置里的 UA 是给阿里用的，可能不同）。
+const Pan115UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
+
 // NewPan115 从配置创建 115 适配器。refresh token 从 TokenStore(provider="115")读。
 func NewPan115(cfg config.Config, tokens TokenStore) *Pan115 {
-	ua := cfg.AliyunBrowserUA
-	if ua == "" {
-		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
-	}
 	return &Pan115{
 		http:   &http.Client{Timeout: 30 * time.Second},
 		tokens: tokens,
-		ua:     ua,
+		ua:     Pan115UA,
 	}
 }
 
