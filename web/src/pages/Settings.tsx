@@ -7,6 +7,8 @@ import {
   aliyunQRStatus,
   checkProvider,
   getProviders,
+  pan115QR,
+  pan115QRStatus,
   saveProviderToken,
   type HealthResult,
   type Provider,
@@ -98,6 +100,11 @@ export default function Settings() {
     ScanSuccess: "已扫描，请在手机上确认",
     LoginSuccess: "✅ 授权成功！原画直链可用了",
     QRCodeExpired: "二维码已过期，请重新获取",
+    P115_0: "请用手机 115 App 扫码",
+    P115_1: "已扫描，请在手机上确认",
+    P115_2: "登录成功！转存 cookie 已保存",
+    "P115_-1": "二维码已过期，请重新获取",
+    "P115_-2": "已取消",
   };
 
   // 开放接口(原画直链)扫码授权：阿里官方 OAuth，服务端需配 client_id/secret。
@@ -127,6 +134,37 @@ export default function Settings() {
       }, 2000);
     } catch (e) {
       setError(String((e as Error).message || e));
+    }
+  };
+
+  // 115 网页扫码登录（拿 cookie 用于转存分享）。状态：0 等待/1 已扫/2 已确认/负数 过期。
+  const startPan115QR = async () => {
+    setError("");
+    setQrStatus("");
+    setQrDataUrl("");
+    stopPoll();
+    try {
+      const sess = await pan115QR();
+      setQrDataUrl(await QRCode.toDataURL(sess.qrcode, { width: 220, margin: 1 }));
+      setQrStatus("P115_0");
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const st = await pan115QRStatus(sess);
+          setQrStatus("P115_" + st);
+          if (st === 2) {
+            stopPoll();
+            loadProviders();
+          } else if (st < 0) {
+            stopPoll();
+          }
+        } catch (e) {
+          setError(String((e as Error).message || e));
+          stopPoll();
+        }
+      }, 2000);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+      stopPoll();
     }
   };
 
@@ -249,7 +287,12 @@ export default function Settings() {
                     {p.authorized ? "重新扫码" : "扫码授权"}
                   </button>
                 )}
-                {p.authMethod === "cookie" && (
+                {p.authMethod === "cookie" && p.provider === "115" && (
+                  <button className="primary" onClick={startPan115QR}>
+                    {p.authorized ? "重新扫码登录" : "扫码登录(转存)"}
+                  </button>
+                )}
+                {p.authMethod === "cookie" && p.provider !== "115" && (
                   <span className="muted" style={{ fontSize: 13 }}>
                     (稍后支持)
                   </span>
