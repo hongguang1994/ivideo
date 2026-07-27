@@ -124,6 +124,8 @@ func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 		return
 	}
 	defer up.Body.Close()
+	slog.Info("代理Range", "客户端", clientRange, "上游状态", up.StatusCode,
+		"上游ContentRange", up.Header.Get("Content-Range"), "上游长度", up.Header.Get("Content-Length"))
 
 	copyStreamHeaders(c, up)
 	c.Status(up.StatusCode)
@@ -162,6 +164,12 @@ func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange
 		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
 		return
 	}
+	if first.StatusCode != http.StatusPartialContent && first.StatusCode != http.StatusOK {
+		first.Body.Close()
+		resp.Fail(c, http.StatusBadGateway,
+			fmt.Sprintf("上游拒绝拉流(HTTP %d)，稍后重试", first.StatusCode))
+		return
+	}
 	total := totalFromContentRange(first.Header.Get("Content-Range"))
 
 	c.Header("Accept-Ranges", "bytes")
@@ -194,6 +202,15 @@ func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange
 		if err != nil {
 			slog.Warn("分段拉流中断", "pos", pos, "err", err)
 			return // 客户端断开或上游出错，正常结束
+		}
+		// **必须检查状态码**：夸克限流/直链过期时会返回 412/502 的 HTML 错误页，
+		// err 却是 nil。若不检查就会把错误页当视频数据拼进流里，
+		// 播放器/ffprobe 解析必然失败（实测报 "moov atom not found"）。
+		if next.StatusCode != http.StatusPartialContent && next.StatusCode != http.StatusOK {
+			next.Body.Close()
+			slog.Warn("分段拉流上游异常，停止拼接",
+				"pos", pos, "上游状态", next.StatusCode)
+			return
 		}
 		up = next
 	}

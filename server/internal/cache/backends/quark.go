@@ -66,8 +66,9 @@ type quarkCachedURL struct {
 	exp time.Time
 }
 
-// quarkURLTTL 是直链缓存时长（远小于夸克 auth_key 的 6h 有效期，安全）。
-const quarkURLTTL = 5 * time.Minute
+// quarkURLTTL 是直链缓存时长。夸克直链 auth_key 有效期约 6 小时，这里取 3 小时：
+// 既避免高频重取（探测/seek 会反复要链），也不会在大文件传到一半时过期。
+const quarkURLTTL = 3 * time.Hour
 
 // StreamCookie 返回拉流应使用的 cookie（download 刷新过的）。
 // 播放代理用它请求直链 —— 夸克直链绑 cookie，不能 302 直跳给播放器。
