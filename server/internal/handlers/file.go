@@ -91,6 +91,14 @@ var proxyClient = &http.Client{} // 流式转发，不设整体超时
 // 取 32MB：足够 ffprobe 解析媒体信息，又能走夸克的分段快通道。
 const probeChunkBytes = 32 << 20
 
+// openEnded 判断 Range 是否「没有上界」（空串，或形如 bytes=0- / bytes=123-）。
+func openEnded(rng string) bool {
+	if rng == "" {
+		return true
+	}
+	return strings.HasSuffix(strings.TrimSpace(rng), "-")
+}
+
 // quarkStreamUA 必须与夸克取直链时用的 UA 一致（夸克接口对 UA 敏感）。
 const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
 	"quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
@@ -99,45 +107,116 @@ const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 // 供 115（绑 UA）和夸克（绑 cookie）使用；与 handlers.go 里那个不带鉴权的
 // proxyStream 区分开，避免影响 OpenList/Jellyfin 既有链路。
 func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, upstream, nil)
-	if err != nil {
-		resp.Fail(c, http.StatusBadGateway, err.Error())
+	clientRange := c.GetHeader("Range")
+
+	// 客户端要「开放式区间」(无 Range 或 bytes=N-)时不能原样转发：
+	// 夸克对没有上界的请求按慢速全量流限速（实测 0.1MB/s，带上界是 8~10MB/s），
+	// ffprobe 探测正是发 "bytes=0-"，这就是开播要等 ~20 秒的根源。
+	// 这里改为内部按 chunk 连续分段拉取，再拼成一条流喂给客户端。
+	if openEnded(clientRange) {
+		h.proxyChunked(c, upstream, ua, cookie, clientRange)
 		return
 	}
-	req.Header.Set("User-Agent", ua)
-	if cookie != "" {
-		req.Header.Set("Cookie", cookie)
-		req.Header.Set("Referer", "https://pan.quark.cn/")
-	}
-	// Range 处理：客户端给了就透传；没给则主动请求一个**有明确上界**的区间。
-	// 夸克对「不带 Range」和「开放式 bytes=0-」都按慢速全量流限速（实测 0.1MB/s），
-	// 只有带上界才走快通道（实测 8~10MB/s）。ffprobe 探测不带 Range，
-	// 正是它把开播拖到 ~20 秒的原因。
-	clientRange := c.GetHeader("Range")
-	rng := clientRange
-	if rng == "" {
-		rng = fmt.Sprintf("bytes=0-%d", probeChunkBytes-1)
-	}
-	req.Header.Set("Range", rng)
-	up, err := proxyClient.Do(req)
+
+	up, err := h.upstreamRange(c, upstream, ua, cookie, clientRange)
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
 		return
 	}
 	defer up.Body.Close()
 
+	copyStreamHeaders(c, up)
+	c.Status(up.StatusCode)
+	_, _ = io.Copy(c.Writer, up.Body)
+}
+
+// upstreamRange 用指定 Range 向上游发起一次请求。
+func (h *Handler) upstreamRange(c *gin.Context, upstream, ua, cookie, rng string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, upstream, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", ua)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("Referer", "https://pan.quark.cn/")
+	}
+	if rng != "" {
+		req.Header.Set("Range", rng)
+	}
+	return proxyClient.Do(req)
+}
+
+// proxyChunked 把「开放式区间」拆成连续的有界分段拉取，边拉边写给客户端。
+// 客户端只看到一条正常的流（无 Range → 200，bytes=N- → 206）。
+func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange string) {
+	var start int64
+	if clientRange != "" {
+		fmt.Sscanf(clientRange, "bytes=%d-", &start)
+	}
+
+	// 先拉第一段，借它的响应头拿到文件总大小并给客户端定头。
+	first, err := h.upstreamRange(c, upstream, ua, cookie,
+		fmt.Sprintf("bytes=%d-%d", start, start+probeChunkBytes-1))
+	if err != nil {
+		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
+		return
+	}
+	total := totalFromContentRange(first.Header.Get("Content-Range"))
+
+	c.Header("Accept-Ranges", "bytes")
+	if v := first.Header.Get("Content-Type"); v != "" {
+		c.Header("Content-Type", v)
+	}
+	if total > 0 {
+		c.Header("Content-Length", strconv.FormatInt(total-start, 10))
+		if clientRange != "" {
+			c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, total-1, total))
+		}
+	}
+	if clientRange == "" {
+		c.Status(http.StatusOK)
+	} else {
+		c.Status(http.StatusPartialContent)
+	}
+
+	pos := start
+	up := first
+	for {
+		n, _ := io.Copy(c.Writer, up.Body)
+		up.Body.Close()
+		pos += n
+		if n == 0 || (total > 0 && pos >= total) {
+			return // 传完了
+		}
+		next, err := h.upstreamRange(c, upstream, ua, cookie,
+			fmt.Sprintf("bytes=%d-%d", pos, pos+probeChunkBytes-1))
+		if err != nil {
+			slog.Warn("分段拉流中断", "pos", pos, "err", err)
+			return // 客户端断开或上游出错，正常结束
+		}
+		up = next
+	}
+}
+
+// copyStreamHeaders 透传上游的关键响应头。
+func copyStreamHeaders(c *gin.Context, up *http.Response) {
 	for _, hk := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"} {
 		if v := up.Header.Get(hk); v != "" {
 			c.Header(hk, v)
 		}
 	}
-	status := up.StatusCode
-	// 客户端没要 Range，但我们为了走快通道向上游要了 —— 对外仍应是完整响应 200，
-	// 且不该带 Content-Range，否则播放器会以为这是分段。
-	if clientRange == "" && status == http.StatusPartialContent {
-		c.Writer.Header().Del("Content-Range")
-		status = http.StatusOK
+}
+
+// totalFromContentRange 从 "bytes 0-33554431/1038876196" 解析出文件总大小，失败返回 0。
+func totalFromContentRange(cr string) int64 {
+	i := strings.LastIndex(cr, "/")
+	if i < 0 {
+		return 0
 	}
-	c.Status(status)
-	_, _ = io.Copy(c.Writer, up.Body)
+	n, err := strconv.ParseInt(strings.TrimSpace(cr[i+1:]), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
