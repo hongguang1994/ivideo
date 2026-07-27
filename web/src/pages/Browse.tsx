@@ -15,8 +15,16 @@ function humanSize(n: number): string {
   return `${v.toFixed(1)} ${units[i]}`;
 }
 
+// 从分享链接自动识别网盘类型（省得手动选错）。
+function detectProvider(url: string): string {
+  if (/pan\.quark\.cn/.test(url)) return "quark";
+  if (/115(cdn)?\.com\/s\//.test(url)) return "115";
+  return "aliyun";
+}
+
 export default function Browse() {
   const [shareUrl, setShareUrl] = useState("");
+  const [provider, setProvider] = useState("aliyun");
   const [sharePwd, setSharePwd] = useState("");
   const [path, setPath] = useState(""); // 当前所在的分享内路径
   const [items, setItems] = useState<ShareEntry[]>([]);
@@ -35,7 +43,7 @@ export default function Browse() {
     setImportMsg("");
     setError("");
     try {
-      const r = await importShare(shareUrl.trim(), sharePwd.trim(), "aliyun", path);
+      const r = await importShare(shareUrl.trim(), sharePwd.trim(), provider, path);
       setImportMsg(`✅ 导入 ${r.added} 个视频（跳过 ${r.skipped} 个已存在）`);
     } catch (e) {
       setError(String((e as Error).message || e));
@@ -70,7 +78,7 @@ export default function Browse() {
     setLoading(true);
     setError("");
     try {
-      const entries = await browseShare(url.trim(), pwd.trim(), p);
+      const entries = await browseShare(url.trim(), pwd.trim(), p, provider);
       setItems(entries);
       setPath(p);
       setOpened(true);
@@ -109,9 +117,23 @@ export default function Browse() {
         <input
           placeholder="分享链接 如 https://www.alipan.com/s/xxxxx"
           value={shareUrl}
-          onChange={(e) => setShareUrl(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setShareUrl(v);
+            setProvider(detectProvider(v)); // 粘贴链接即自动识别网盘
+          }}
           style={{ flex: "1 1 320px" }}
         />
+        <select
+          value={provider}
+          onChange={(e) => setProvider(e.target.value)}
+          style={{ flex: "0 0 120px" }}
+          title="网盘类型（按链接自动识别，也可手动改）"
+        >
+          <option value="aliyun">阿里云盘</option>
+          <option value="quark">夸克网盘</option>
+          <option value="115">115网盘</option>
+        </select>
         <input
           placeholder="提取码(没有可留空)"
           value={sharePwd}
