@@ -20,4 +20,8 @@ func registerSettings(api *gin.RouterGroup, h *handlers.Handler) {
 	// 115 网页扫码登录 —— 拿网页态 cookie，用于转存分享
 	api.POST("/auth/115/qr", h.Pan115QR)
 	api.POST("/auth/115/qr/status", h.Pan115QRStatus)
+
+	// 夸克扫码登录 —— 夸克开放 API 需 secret 签名，故整条链路走网页 cookie
+	api.POST("/auth/quark/qr", h.QuarkQR)
+	api.POST("/auth/quark/qr/status", h.QuarkQRStatus)
 }
