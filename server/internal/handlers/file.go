@@ -124,12 +124,12 @@ const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string, size int64) {
 	clientRange := c.GetHeader("Range")
 
-	// 只有「完全不带 Range」才走分段：夸克对无上界请求按慢速全量流限速
-	// （实测 0.1MB/s，带上界 8~10MB/s），分段拉取可绕开。
-	// 而 "bytes=N-" 是播放器/ffprobe 的 seek，必须原样透传 ——
-	// 若也走分段，seek 到文件尾就要从 N 一路顺序拉到结尾（实测拉了 2.4GB），
-	// 既慢又会被客户端中途断开。
-	if clientRange == "" {
+	// 「开放式区间」(无 Range 或 bytes=N-) 一律走分段：
+	// 客户端要的是「从 N 到文件结尾」的**完整**内容，必须给足长度 ——
+	// 只回一个固定块就结束会让播放器/ffmpeg 读到意外 EOF，转码中途失败。
+	// 而夸克对无上界请求限速(0.1MB/s)，所以内部拆成有界块连续拉取，
+	// 对外仍是一条完整的流。
+	if openEnded(clientRange) {
 		h.proxyChunked(c, upstream, ua, cookie, clientRange, size)
 		return
 	}
