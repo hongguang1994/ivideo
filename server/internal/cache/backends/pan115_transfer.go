@@ -80,6 +80,7 @@ func (p *Pan115) keepAliveCookie(ctx context.Context) {
 type pan115SnapItem struct {
 	Name string `json:"n"`
 	Fid  string `json:"fid"`
+	Cid  string `json:"cid"` // 目录的 id（文件为空，文件用 Fid）
 	// fc: 0=目录 1=文件。115 有时返回数字、有时返回字符串，用 json.Number 兼容两种。
 	Fc json.Number `json:"fc"`
 }
@@ -88,12 +89,15 @@ type pan115SnapItem struct {
 func (it pan115SnapItem) isFile() bool { return it.Fc.String() == "1" }
 
 // shareSnap 列分享内文件（带 cookie 更稳）。
-func (p *Pan115) shareSnap(ctx context.Context, shareCode, receiveCode string) ([]pan115SnapItem, error) {
+func (p *Pan115) shareSnap(ctx context.Context, shareCode, receiveCode, cid string) ([]pan115SnapItem, error) {
 	q := url.Values{
 		"share_code":   {shareCode},
 		"receive_code": {receiveCode},
 		"offset":       {"0"},
 		"limit":        {"200"},
+	}
+	if cid != "" {
+		q.Set("cid", cid) // 进子目录
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pan115Web+"/share/snap?"+q.Encode(), nil)
 	if err != nil {
@@ -132,7 +136,29 @@ func (p *Pan115) ListShare(ctx context.Context, share cache.ShareRef, subPath st
 	if shareCode == "" {
 		return nil, fmt.Errorf("无法从分享链接解析 share_code: %s", share.ShareURL)
 	}
-	items, err := p.shareSnap(ctx, shareCode, receiveCode)
+	// 按 subPath 逐层下钻到目标目录（115 用目录的 cid 进子层）。
+	cid, prefix := "", ""
+	for _, seg := range strings.Split(strings.Trim(subPath, "/"), "/") {
+		if seg == "" {
+			continue
+		}
+		items, err := p.shareSnap(ctx, shareCode, receiveCode, cid)
+		if err != nil {
+			return nil, err
+		}
+		found := false
+		for _, it := range items {
+			if it.Name == seg && !it.isFile() {
+				cid, prefix, found = it.Cid, prefix+seg+"/", true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("分享内未找到目录 %q", seg)
+		}
+	}
+
+	items, err := p.shareSnap(ctx, shareCode, receiveCode, cid)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +166,7 @@ func (p *Pan115) ListShare(ctx context.Context, share cache.ShareRef, subPath st
 	for _, it := range items {
 		out = append(out, cache.ShareEntry{
 			Name:  it.Name,
-			Path:  it.Name, // 分享内以文件名定位（转存时按名匹配）
+			Path:  prefix + it.Name, // 相对分享根的路径，供下钻/转存定位
 			IsDir: !it.isFile(),
 		})
 	}
@@ -215,7 +241,7 @@ func (p *Pan115) receiveShareFile(ctx context.Context, shareURL, pwd, filePath s
 	if shareCode == "" {
 		return "", 0, fmt.Errorf("无法从分享链接解析 share_code: %s", shareURL)
 	}
-	items, err := p.shareSnap(ctx, shareCode, receiveCode)
+	items, err := p.shareSnap(ctx, shareCode, receiveCode, "")
 	if err != nil {
 		return "", 0, err
 	}
