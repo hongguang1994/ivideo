@@ -536,3 +536,59 @@ func (q *Quark) ensureFolder(ctx context.Context, name string) (string, error) {
 	}
 	return made.Data.Fid, nil
 }
+
+// WalkShare 递归遍历整个分享，一次性返回所有文件条目（供批量导入资源库）。
+// 深度/数量都设了上限，避免超大分享把内存和夸克接口打爆。
+func (q *Quark) WalkShare(ctx context.Context, share cache.ShareRef) ([]cache.ShareEntry, error) {
+	m := reQuarkShare.FindStringSubmatch(share.ShareURL)
+	if m == nil {
+		return nil, fmt.Errorf("无法解析夸克分享链接: %s", share.ShareURL)
+	}
+	pwdID := m[1]
+	stoken, err := q.shareToken(ctx, pwdID, strings.TrimSpace(share.SharePwd))
+	if err != nil {
+		return nil, err
+	}
+	// 起始目录：share.FilePath 非空则从该子目录开始（「导入此目录」用）。
+	startFid, prefix := "0", ""
+	if sp := strings.Trim(share.FilePath, "/"); sp != "" {
+		it, err := q.findInShare(ctx, pwdID, stoken, sp)
+		if err != nil {
+			return nil, err
+		}
+		startFid, prefix = it.Fid, sp+"/"
+	}
+	var out []cache.ShareEntry
+	err = q.walkDir(ctx, pwdID, stoken, startFid, prefix, 0, &out)
+	return out, err
+}
+
+const (
+	quarkWalkMaxDepth = 8
+	quarkWalkMaxFiles = 2000
+)
+
+// walkDir 深度优先遍历分享目录，把文件累加进 out。
+func (q *Quark) walkDir(ctx context.Context, pwdID, stoken, fid, prefix string, depth int, out *[]cache.ShareEntry) error {
+	if depth > quarkWalkMaxDepth || len(*out) >= quarkWalkMaxFiles {
+		return nil
+	}
+	items, err := q.shareDetail(ctx, pwdID, stoken, fid)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		if len(*out) >= quarkWalkMaxFiles {
+			return nil
+		}
+		p := prefix + it.FileName
+		if it.Dir {
+			if err := q.walkDir(ctx, pwdID, stoken, it.Fid, p+"/", depth+1, out); err != nil {
+				return err
+			}
+			continue
+		}
+		*out = append(*out, cache.ShareEntry{Name: it.FileName, Path: p, IsDir: false, Size: it.Size})
+	}
+	return nil
+}
