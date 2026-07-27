@@ -53,7 +53,21 @@ type Quark struct {
 
 	cacheDirMu  sync.Mutex
 	cacheDirFid string // 缓存目录(默认 ivideo)的 fid，首次用时解析并记住
+
+	// 直链缓存：ffprobe 探测/播放器 seek 会**反复**取直链，每次都请求夸克
+	// download 接口会把开播拖到近 20 秒（实测）。夸克直链 auth_key 有效期约 6h，
+	// 这里短时缓存即可大幅提速。
+	urlMu    sync.Mutex
+	urlCache map[string]quarkCachedURL
 }
+
+type quarkCachedURL struct {
+	url string
+	exp time.Time
+}
+
+// quarkURLTTL 是直链缓存时长（远小于夸克 auth_key 的 6h 有效期，安全）。
+const quarkURLTTL = 5 * time.Minute
 
 // StreamCookie 返回拉流应使用的 cookie（download 刷新过的）。
 // 播放代理用它请求直链 —— 夸克直链绑 cookie，不能 302 直跳给播放器。
@@ -70,8 +84,9 @@ func (q *Quark) StreamCookie() string {
 // 由「设置页夸克扫码登录」写入。
 func NewQuark(cfg config.Config, tokens TokenStore) *Quark {
 	return &Quark{
-		http:   &http.Client{Timeout: 30 * time.Second},
-		tokens: tokens,
+		http:     &http.Client{Timeout: 30 * time.Second},
+		tokens:   tokens,
+		urlCache: make(map[string]quarkCachedURL),
 	}
 }
 
@@ -323,6 +338,15 @@ func (q *Quark) findInFolder(ctx context.Context, dirFid, name string) (string, 
 // 注意：夸克直链有强防盗链，实测服务端拉流恒返回 412（各种 UA/Cookie/Referer 组合均无效），
 // 故此处返回明确错误而非一个不可用的地址，避免上层反复重试。
 func (q *Quark) DirectURL(ctx context.Context, cachePath string) (string, error) {
+	// 先看缓存 —— 探测和 seek 会高频调这里。
+	q.urlMu.Lock()
+	if c, ok := q.urlCache[cachePath]; ok && time.Now().Before(c.exp) {
+		u := c.url
+		q.urlMu.Unlock()
+		return u, nil
+	}
+	q.urlMu.Unlock()
+
 	ck := q.cookie()
 	if ck == "" {
 		return "", fmt.Errorf("未配置夸克 cookie，请在设置页扫码登录")
@@ -362,7 +386,11 @@ func (q *Quark) DirectURL(ctx context.Context, cachePath string) (string, error)
 	if out.Code != 0 || len(out.Data) == 0 || out.Data[0].DownloadURL == "" {
 		return "", fmt.Errorf("夸克取直链失败: %s", out.Message)
 	}
-	return out.Data[0].DownloadURL, nil
+	u := out.Data[0].DownloadURL
+	q.urlMu.Lock()
+	q.urlCache[cachePath] = quarkCachedURL{url: u, exp: time.Now().Add(quarkURLTTL)}
+	q.urlMu.Unlock()
+	return u, nil
 }
 
 // mergeStreamCookie 用响应下发的 Set-Cookie 覆盖原 cookie 里的同名项，存为拉流 cookie。
