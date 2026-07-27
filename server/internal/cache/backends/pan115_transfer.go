@@ -80,8 +80,12 @@ func (p *Pan115) keepAliveCookie(ctx context.Context) {
 type pan115SnapItem struct {
 	Name string `json:"n"`
 	Fid  string `json:"fid"`
-	Fc   string `json:"fc"` // "0"=目录 "1"=文件
+	// fc: 0=目录 1=文件。115 有时返回数字、有时返回字符串，用 json.Number 兼容两种。
+	Fc json.Number `json:"fc"`
 }
+
+// isFile 判断条目是否是文件（fc=1）。
+func (it pan115SnapItem) isFile() bool { return it.Fc.String() == "1" }
 
 // shareSnap 列分享内文件（带 cookie 更稳）。
 func (p *Pan115) shareSnap(ctx context.Context, shareCode, receiveCode string) ([]pan115SnapItem, error) {
@@ -137,7 +141,7 @@ func (p *Pan115) ListShare(ctx context.Context, share cache.ShareRef, subPath st
 		out = append(out, cache.ShareEntry{
 			Name:  it.Name,
 			Path:  it.Name, // 分享内以文件名定位（转存时按名匹配）
-			IsDir: it.Fc == "0",
+			IsDir: !it.isFile(),
 		})
 	}
 	return out, nil
@@ -221,7 +225,7 @@ func (p *Pan115) receiveShareFile(ctx context.Context, shareURL, pwd, filePath s
 	}
 	var fileID, name string
 	for _, it := range items {
-		if it.Fc == "1" && (it.Name == want || want == "") {
+		if it.isFile() && (it.Name == want || want == "") {
 			fileID, name = it.Fid, it.Name
 			break
 		}
