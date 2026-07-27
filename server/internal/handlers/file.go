@@ -87,6 +87,10 @@ const pan115UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 C
 
 var proxyClient = &http.Client{} // 流式转发，不设整体超时
 
+// probeChunkBytes 是客户端未指定 Range 时，向上游请求的区间大小。
+// 取 32MB：足够 ffprobe 解析媒体信息，又能走夸克的分段快通道。
+const probeChunkBytes = 32 << 20
+
 // quarkStreamUA 必须与夸克取直链时用的 UA 一致（夸克接口对 UA 敏感）。
 const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
 	"quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
@@ -105,13 +109,14 @@ func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 		req.Header.Set("Cookie", cookie)
 		req.Header.Set("Referer", "https://pan.quark.cn/")
 	}
-	// Range 处理：客户端给了就透传；没给也主动带 "bytes=0-"。
-	// 夸克对**不带 Range** 的请求返回慢速全量流（实测 ffprobe 探测因此拖到 ~20 秒，
-	// 而带 Range 只要 0.5 秒），带上后走分段快通道。
+	// Range 处理：客户端给了就透传；没给则主动请求一个**有明确上界**的区间。
+	// 夸克对「不带 Range」和「开放式 bytes=0-」都按慢速全量流限速（实测 0.1MB/s），
+	// 只有带上界才走快通道（实测 8~10MB/s）。ffprobe 探测不带 Range，
+	// 正是它把开播拖到 ~20 秒的原因。
 	clientRange := c.GetHeader("Range")
 	rng := clientRange
 	if rng == "" {
-		rng = "bytes=0-"
+		rng = fmt.Sprintf("bytes=0-%d", probeChunkBytes-1)
 	}
 	req.Header.Set("Range", rng)
 	up, err := proxyClient.Do(req)
