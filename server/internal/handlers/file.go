@@ -65,11 +65,11 @@ func (h *Handler) FileGateway(c *gin.Context) {
 	//   夸克 —— 直链绑 cookie（每次取直链都会刷新 __puus），不带会被 CDN 拒（412）
 	// 两者都由 ivideo 用正确的 UA/cookie 拉流、透传 Range 后转发。
 	if strings.HasPrefix(res.Item.CachePath, "115:") {
-		h.proxyStreamWith(c, res.URL, pan115UA, "")
+		h.proxyStreamWith(c, res.URL, pan115UA, "", res.Item.Size)
 		return
 	}
 	if strings.HasPrefix(res.Item.CachePath, "quark:") {
-		h.proxyStreamWith(c, res.URL, quarkStreamUA, h.cache.StreamCookie(res.Item.CachePath))
+		h.proxyStreamWith(c, res.URL, quarkStreamUA, h.cache.StreamCookie(res.Item.CachePath), res.Item.Size)
 		return
 	}
 
@@ -91,6 +91,18 @@ var proxyClient = &http.Client{} // 流式转发，不设整体超时
 // 取 32MB：足够 ffprobe 解析媒体信息，又能走夸克的分段快通道。
 const probeChunkBytes = 32 << 20
 
+// boundedEnd 算出 Range 的上界，并**钳制在文件末尾之内**。
+// 关键：夸克/OSS 在上界超出文件大小时会**忽略整个 Range**、从头返回全量（实测
+// 返回 200 + 文件开头），导致 ffprobe seek 到 moov 却拿到 ftyp，报 "moov atom not found"。
+// size<=0（未知大小）时不钳制，只能按固定块长走。
+func boundedEnd(start, size int64) int64 {
+	end := start + probeChunkBytes - 1
+	if size > 0 && end > size-1 {
+		end = size - 1
+	}
+	return end
+}
+
 // openEnded 判断 Range 是否「没有上界」（空串，或形如 bytes=0- / bytes=123-）。
 func openEnded(rng string) bool {
 	if rng == "" {
@@ -106,7 +118,7 @@ const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 // proxyStreamWith 用指定 UA/cookie 拉上游直链并流式转发，透传 Range 与关键响应头。
 // 供 115（绑 UA）和夸克（绑 cookie）使用；与 handlers.go 里那个不带鉴权的
 // proxyStream 区分开，避免影响 OpenList/Jellyfin 既有链路。
-func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
+func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string, size int64) {
 	clientRange := c.GetHeader("Range")
 
 	// 只有「完全不带 Range」才走分段：夸克对无上界请求按慢速全量流限速
@@ -115,7 +127,7 @@ func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 	// 若也走分段，seek 到文件尾就要从 N 一路顺序拉到结尾（实测拉了 2.4GB），
 	// 既慢又会被客户端中途断开。
 	if clientRange == "" {
-		h.proxyChunked(c, upstream, ua, cookie, clientRange)
+		h.proxyChunked(c, upstream, ua, cookie, clientRange, size)
 		return
 	}
 
@@ -125,7 +137,7 @@ func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 	if openEnded(upRange) {
 		var start int64
 		fmt.Sscanf(upRange, "bytes=%d-", &start)
-		upRange = fmt.Sprintf("bytes=%d-%d", start, start+probeChunkBytes-1)
+		upRange = fmt.Sprintf("bytes=%d-%d", start, boundedEnd(start, size))
 	}
 
 	up, err := h.upstreamRange(c, upstream, ua, cookie, upRange)
@@ -159,7 +171,7 @@ func (h *Handler) upstreamRange(c *gin.Context, upstream, ua, cookie, rng string
 
 // proxyChunked 把「开放式区间」拆成连续的有界分段拉取，边拉边写给客户端。
 // 客户端只看到一条正常的流（无 Range → 200，bytes=N- → 206）。
-func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange string) {
+func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange string, size int64) {
 	var start int64
 	if clientRange != "" {
 		fmt.Sscanf(clientRange, "bytes=%d-", &start)
@@ -167,7 +179,7 @@ func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange
 
 	// 先拉第一段，借它的响应头拿到文件总大小并给客户端定头。
 	first, err := h.upstreamRange(c, upstream, ua, cookie,
-		fmt.Sprintf("bytes=%d-%d", start, start+probeChunkBytes-1))
+		fmt.Sprintf("bytes=%d-%d", start, boundedEnd(start, size)))
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
 		return
@@ -206,7 +218,7 @@ func (h *Handler) proxyChunked(c *gin.Context, upstream, ua, cookie, clientRange
 			return // 传完了
 		}
 		next, err := h.upstreamRange(c, upstream, ua, cookie,
-			fmt.Sprintf("bytes=%d-%d", pos, pos+probeChunkBytes-1))
+			fmt.Sprintf("bytes=%d-%d", pos, boundedEnd(pos, total)))
 		if err != nil {
 			slog.Warn("分段拉流中断", "pos", pos, "err", err)
 			return // 客户端断开或上游出错，正常结束
