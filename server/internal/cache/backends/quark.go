@@ -472,3 +472,67 @@ func (q *Quark) RefreshTokens(ctx context.Context) error {
 	}
 	return q.Verify(ctx, "quark")
 }
+
+// SaveToFolder 手动转存：把分享内某文件/目录存进自己盘的指定目录（永久留存，不受即删影响）。
+func (q *Quark) SaveToFolder(ctx context.Context, share cache.ShareRef, srcPath, targetFolder string) error {
+	m := reQuarkShare.FindStringSubmatch(share.ShareURL)
+	if m == nil {
+		return fmt.Errorf("无法解析夸克分享链接: %s", share.ShareURL)
+	}
+	pwdID := m[1]
+	stoken, err := q.shareToken(ctx, pwdID, strings.TrimSpace(share.SharePwd))
+	if err != nil {
+		return err
+	}
+	it, err := q.findInShare(ctx, pwdID, stoken, srcPath)
+	if err != nil {
+		return err
+	}
+	toDir, err := q.ensureFolder(ctx, strings.TrimSpace(targetFolder))
+	if err != nil {
+		return err
+	}
+	return q.shareSave(ctx, pwdID, stoken, it, toDir)
+}
+
+// ensureFolder 在自己盘根目录下按名找目录，没有就建，返回其 fid。名字为空则用根目录。
+func (q *Quark) ensureFolder(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return "0", nil
+	}
+	var list struct {
+		Code int `json:"code"`
+		Data struct {
+			List []struct {
+				Fid      string `json:"fid"`
+				FileName string `json:"file_name"`
+				Dir      bool   `json:"dir"`
+			} `json:"list"`
+		} `json:"data"`
+	}
+	qs := url.Values{"pdir_fid": {"0"}, "_page": {"1"}, "_size": {"200"}}
+	if err := q.call(ctx, http.MethodGet, quarkDriveBase, "/1/clouddrive/file/sort", qs, nil, &list); err != nil {
+		return "", err
+	}
+	for _, f := range list.Data.List {
+		if f.Dir && f.FileName == name {
+			return f.Fid, nil
+		}
+	}
+	// 没找到就创建
+	var made struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Fid string `json:"fid"`
+		} `json:"data"`
+	}
+	payload := map[string]any{"pdir_fid": "0", "file_name": name, "dir_path": "", "dir_init_lock": false}
+	if err := q.call(ctx, http.MethodPost, quarkDriveBase, "/1/clouddrive/file", nil, payload, &made); err != nil {
+		return "", err
+	}
+	if made.Data.Fid == "" {
+		return "", fmt.Errorf("夸克创建目录 %q 失败: %s", name, made.Message)
+	}
+	return made.Data.Fid, nil
+}

@@ -63,6 +63,7 @@ export default function Browse() {
         sharePwd: sharePwd.trim(),
         path: e.path,
         targetFolder: targetFolder.trim() || "ivideo",
+        provider, // 不传会被后端当成阿里
       });
       setSaved((s) => ({ ...s, [e.path]: "✅ 已转存" }));
     } catch (err) {
