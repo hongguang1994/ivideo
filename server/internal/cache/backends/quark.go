@@ -245,6 +245,14 @@ func (q *Quark) findInShare(ctx context.Context, pwdID, stoken, filePath string)
 
 // Transfer 按需转存：把分享里的目标文件存进自己盘根目录，返回其 fid。
 func (q *Quark) Transfer(ctx context.Context, share cache.ShareRef) (cache.TransferResult, error) {
+	// 无分享链接：视为「文件已在自己盘」，FilePath 直接是 fid（导入自己盘的资源）。
+	if strings.TrimSpace(share.ShareURL) == "" {
+		fid := strings.TrimSpace(share.FilePath)
+		if fid == "" {
+			return cache.TransferResult{}, fmt.Errorf("夸克资源缺少 fid")
+		}
+		return cache.TransferResult{CachePath: fid}, nil
+	}
 	m := reQuarkShare.FindStringSubmatch(share.ShareURL)
 	if m == nil {
 		return cache.TransferResult{}, fmt.Errorf("无法解析夸克分享链接: %s", share.ShareURL)
