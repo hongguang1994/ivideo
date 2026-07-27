@@ -35,7 +35,9 @@ func (m MediaInfo) Genre() string {
 
 var (
 	// 匹配 .../Sxx/SxxEyy.<ext>：季目录 + 分集文件。大小写不敏感。
-	reEpisodeFile = regexp.MustCompile(`(?i)/S(\d{1,3})/S(\d{1,3})E(\d{1,3})\.[a-z0-9]+$`)
+	// 季目录下的分集文件：SxxExx 可以**嵌在**文件名任意位置，
+	// 如 /S02/癫狂记.Big.Train.S02E06.2002.mkv，不要求整个文件名就是集号。
+	reEpisodeFile = regexp.MustCompile(`(?i)/S(\d{1,3})/[^/]*S(\d{1,3})E(\d{1,3})[^/]*\.[a-z0-9]+$`)
 	// 从标题里提取 4 位年份（1900–2099）。
 	reYear = regexp.MustCompile(`(19|20)\d{2}`)
 	// 季目录名 Sxx。
