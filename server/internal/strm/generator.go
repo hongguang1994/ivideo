@@ -114,6 +114,20 @@ func (g *Generator) planLayout(r store.Resource, info MediaInfo) layout {
 	if info.Library() == LibMovies {
 		cleanName, cleanYear := CleanMovieTitle(info.Title)
 		name := sanitize(cleanName)
+		// 清理后为空（如 "03.mp4" 这种纯数字分集名）：用「父目录名 + 原标题」，
+		// 比 resource-<id> 可读得多，Jellyfin 里也能看出是哪部片的第几集。
+		if name == "" {
+			base := sanitize(info.Title)
+			if parent := parentDirName(r.FilePath); parent != "" {
+				if base != "" {
+					name = sanitize(parent + " " + base)
+				} else {
+					name = sanitize(parent)
+				}
+			} else {
+				name = base
+			}
+		}
 		if name == "" {
 			name = fmt.Sprintf("resource-%d", r.ID)
 		}
@@ -278,4 +292,13 @@ func ext(filePath string) string {
 		return e
 	}
 	return ".mkv"
+}
+
+// parentDirName 取 file_path 里文件所在目录的名字（用于给无意义文件名兜底命名）。
+func parentDirName(filePath string) string {
+	segs := splitClean(filePath)
+	if len(segs) < 2 {
+		return ""
+	}
+	return segs[len(segs)-2]
 }
