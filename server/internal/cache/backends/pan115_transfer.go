@@ -122,6 +122,10 @@ func (p *Pan115) shareSnap(ctx context.Context, shareCode, receiveCode, cid stri
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	// 115 触发频率限流时会返回 HTML 错误页（而非 JSON），给出可读提示而不是解析错误。
+	if len(raw) > 0 && raw[0] == '<' {
+		return nil, fmt.Errorf("115 接口暂时限流（返回了网页而非数据），请过一会儿再试")
+	}
 	var out struct {
 		State bool   `json:"state"`
 		Error string `json:"error"`
