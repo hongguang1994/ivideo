@@ -72,7 +72,7 @@ export default function Browse() {
     }
   };
 
-  const list = async (p: string, url = shareUrl, pwd = sharePwd) => {
+  const list = async (p: string, url = shareUrl, pwd = sharePwd, prov = provider) => {
     if (!url.trim()) {
       setError("请先填分享链接");
       return;
@@ -80,7 +80,7 @@ export default function Browse() {
     setLoading(true);
     setError("");
     try {
-      const entries = await browseShare(url.trim(), pwd.trim(), p, provider);
+      const entries = await browseShare(url.trim(), pwd.trim(), p, prov);
       setItems(entries);
       setPath(p);
       setOpened(true);
@@ -99,11 +99,13 @@ export default function Browse() {
   // 从「分享库」点「浏览」跳转过来：预填链接/提取码并自动加载。
   const location = useLocation();
   useEffect(() => {
-    const st = location.state as { shareUrl?: string; sharePwd?: string } | null;
+    const st = location.state as { shareUrl?: string; sharePwd?: string; provider?: string } | null;
     if (st?.shareUrl) {
+      const prov = st.provider || detectProvider(st.shareUrl);
       setShareUrl(st.shareUrl);
       setSharePwd(st.sharePwd || "");
-      list("", st.shareUrl, st.sharePwd || "");
+      setProvider(prov);
+      list("", st.shareUrl, st.sharePwd || "", prov);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
