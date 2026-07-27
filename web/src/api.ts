@@ -309,3 +309,19 @@ export async function pan115QRStatus(s: Pan115Session): Promise<number> {
   const d = await post<{ status: number }>("/auth/115/qr/status", s);
   return d.status;
 }
+
+// 夸克扫码登录会话（拿网页态 cookie；夸克开放 API 需 secret 签名，走不通）。
+export interface QuarkSession {
+  token: string;
+  qrcode: string;
+}
+
+export function quarkQR(): Promise<QuarkSession> {
+  return post<QuarkSession>("/auth/quark/qr");
+}
+
+// 轮询夸克扫码状态：50004001 等待 / 2000000 已确认。
+export async function quarkQRStatus(s: QuarkSession): Promise<number> {
+  const d = await post<{ status: number }>("/auth/quark/qr/status", s);
+  return d.status;
+}

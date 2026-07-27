@@ -9,6 +9,8 @@ import {
   getProviders,
   pan115QR,
   pan115QRStatus,
+  quarkQR,
+  quarkQRStatus,
   saveProviderToken,
   type HealthResult,
   type Provider,
@@ -100,6 +102,8 @@ export default function Settings() {
     ScanSuccess: "已扫描，请在手机上确认",
     LoginSuccess: "✅ 授权成功！原画直链可用了",
     QRCodeExpired: "二维码已过期，请重新获取",
+    QuarkWait: "请用夸克 App 扫码登录",
+    QuarkOK: "✅ 夸克已登录，cookie 已保存",
     P115_0: "请用手机 115 App 扫码",
     P115_1: "已扫描，请在手机上确认",
     P115_2: "登录成功！转存 cookie 已保存",
@@ -138,6 +142,34 @@ export default function Settings() {
   };
 
   // 115 网页扫码登录（拿 cookie 用于转存分享）。状态：0 等待/1 已扫/2 已确认/负数 过期。
+  // 夸克扫码登录：拿网页 cookie（夸克开放 API 需 secret 签名，走不通）
+  const startQuarkQR = async () => {
+    setError("");
+    setQrStatus("");
+    setQrDataUrl("");
+    stopPoll();
+    try {
+      const sess = await quarkQR();
+      setQrDataUrl(await QRCode.toDataURL(sess.qrcode, { width: 220, margin: 1 }));
+      setQrStatus("QuarkWait");
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const st = await quarkQRStatus(sess);
+          if (st === 2000000) {
+            setQrStatus("QuarkOK");
+            stopPoll();
+            loadProviders();
+          }
+        } catch (e) {
+          setError(String((e as Error).message || e));
+          stopPoll();
+        }
+      }, 2000);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    }
+  };
+
   const startPan115QR = async () => {
     setError("");
     setQrStatus("");
@@ -292,7 +324,12 @@ export default function Settings() {
                     {p.authorized ? "重新扫码登录" : "扫码登录(转存)"}
                   </button>
                 )}
-                {p.authMethod === "cookie" && p.provider !== "115" && (
+                {p.authMethod === "cookie" && p.provider === "quark" && (
+                  <button className="primary" onClick={startQuarkQR}>
+                    {p.authorized ? "重新扫码登录" : "扫码登录"}
+                  </button>
+                )}
+                {p.authMethod === "cookie" && p.provider !== "115" && p.provider !== "quark" && (
                   <span className="muted" style={{ fontSize: 13 }}>
                     (稍后支持)
                   </span>
