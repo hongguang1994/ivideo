@@ -19,8 +19,7 @@ type Manager struct {
 	mu       sync.Mutex
 	inflight map[int64]bool // 正在转存的资源 ID，用于去重
 
-	sessions  SessionSource   // 会话源（Jellyfin）：为 nil 时退回纯 TTL 清理
-	stoppedAt map[int64]int64 // 资源 → 首次"离开会话"的时间(unix)，用于停止宽限期
+	sessions SessionSource // 会话源（Jellyfin）：为 nil 时退回纯 TTL 清理
 
 	// 自动选流：码率超过 originalMaxMbps 的片源改走转码流（0 = 关闭，一律原画）。
 	// durations 缓存视频时长，避免同一资源反复问网盘。
@@ -35,7 +34,6 @@ func NewManager(st store.Store, backend CacheBackend, cacheDir string) *Manager 
 		backend:   backend,
 		cacheDir:  cacheDir,
 		inflight:  make(map[int64]bool),
-		stoppedAt: make(map[int64]int64),
 		durations: make(map[int64]float64),
 	}
 }

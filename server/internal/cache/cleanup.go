@@ -56,9 +56,8 @@ func (m *Manager) cleanupOnce(ttlHours int, maxBytes int64, stopGraceSec int64) 
 	deleted := false
 
 	for _, it := range items {
-		// 正在会话中（播放/暂停）→ 保护，重置停止计时。
+		// 正在会话中（播放/暂停）→ 保护。
 		if sessionOK && active[it.ResourceID] {
-			delete(m.stoppedAt, it.ResourceID)
 			continue
 		}
 
