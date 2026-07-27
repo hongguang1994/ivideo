@@ -50,6 +50,9 @@ type Quark struct {
 	// 供播放代理取用。
 	streamMu     sync.Mutex
 	streamCookie string
+
+	cacheDirMu  sync.Mutex
+	cacheDirFid string // 缓存目录(默认 ivideo)的 fid，首次用时解析并记住
 }
 
 // StreamCookie 返回拉流应使用的 cookie（download 刷新过的）。
@@ -266,23 +269,28 @@ func (q *Quark) Transfer(ctx context.Context, share cache.ShareRef) (cache.Trans
 	if err != nil {
 		return cache.TransferResult{}, err
 	}
-	// 已经转存过就直接复用（Jellyfin 扫库/探测会反复触发，重复转存既慢又可能被夸克限流）。
-	if fid, size, err := q.findOwnFileByNameOnce(ctx, it.FileName); err == nil && fid != "" {
-		return cache.TransferResult{CachePath: fid, Size: size}, nil
-	}
-	if err := q.shareSave(ctx, pwdID, stoken, it, "0"); err != nil {
+	// 转存进专用缓存目录（默认 ivideo），不污染网盘根目录。
+	cacheDir, err := q.cacheFolderFid(ctx)
+	if err != nil {
 		return cache.TransferResult{}, err
 	}
-	// 转存是异步任务，稍后按文件名在自己盘里找到 fid。
-	fid, size, err := q.findOwnFileByName(ctx, it.FileName)
+	// 已经转存过就直接复用（Jellyfin 扫库/探测会反复触发，重复转存既慢又可能被夸克限流）。
+	if fid, size, err := q.findInFolderOnce(ctx, cacheDir, it.FileName); err == nil && fid != "" {
+		return cache.TransferResult{CachePath: fid, Size: size}, nil
+	}
+	if err := q.shareSave(ctx, pwdID, stoken, it, cacheDir); err != nil {
+		return cache.TransferResult{}, err
+	}
+	// 转存是异步任务，稍后在缓存目录里按文件名找到 fid。
+	fid, size, err := q.findInFolder(ctx, cacheDir, it.FileName)
 	if err != nil {
 		return cache.TransferResult{}, err
 	}
 	return cache.TransferResult{CachePath: fid, Size: size}, nil
 }
 
-// findOwnFileByName 在自己盘根目录按文件名找 fid（转存后定位用，带重试等异步任务落地）。
-func (q *Quark) findOwnFileByName(ctx context.Context, name string) (string, int64, error) {
+// findInFolder 在指定目录按文件名找 fid（转存后定位用，带重试等异步任务落地）。
+func (q *Quark) findInFolder(ctx context.Context, dirFid, name string) (string, int64, error) {
 	for attempt := 0; attempt < 6; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Second)
@@ -297,7 +305,7 @@ func (q *Quark) findOwnFileByName(ctx context.Context, name string) (string, int
 				} `json:"list"`
 			} `json:"data"`
 		}
-		qs := url.Values{"pdir_fid": {"0"}, "_page": {"1"}, "_size": {"200"},
+		qs := url.Values{"pdir_fid": {dirFid}, "_page": {"1"}, "_size": {"200"},
 			"_sort": {"file_type:asc,updated_at:desc"}}
 		if err := q.call(ctx, http.MethodGet, quarkDriveBase, "/1/clouddrive/file/sort", qs, nil, &out); err != nil {
 			return "", 0, err
@@ -597,8 +605,8 @@ func (q *Quark) walkDir(ctx context.Context, pwdID, stoken, fid, prefix string, 
 	return nil
 }
 
-// findOwnFileByNameOnce 在自己盘根目录按文件名找一次（不重试），用于判断是否已转存过。
-func (q *Quark) findOwnFileByNameOnce(ctx context.Context, name string) (string, int64, error) {
+// findInFolderOnce 在指定目录按文件名找一次（不重试），用于判断是否已转存过。
+func (q *Quark) findInFolderOnce(ctx context.Context, dirFid, name string) (string, int64, error) {
 	var out struct {
 		Code int `json:"code"`
 		Data struct {
@@ -609,7 +617,7 @@ func (q *Quark) findOwnFileByNameOnce(ctx context.Context, name string) (string,
 			} `json:"list"`
 		} `json:"data"`
 	}
-	qs := url.Values{"pdir_fid": {"0"}, "_page": {"1"}, "_size": {"200"},
+	qs := url.Values{"pdir_fid": {dirFid}, "_page": {"1"}, "_size": {"200"},
 		"_sort": {"file_type:asc,updated_at:desc"}}
 	if err := q.call(ctx, http.MethodGet, quarkDriveBase, "/1/clouddrive/file/sort", qs, nil, &out); err != nil {
 		return "", 0, err
@@ -620,4 +628,27 @@ func (q *Quark) findOwnFileByNameOnce(ctx context.Context, name string) (string,
 		}
 	}
 	return "", 0, nil
+}
+
+// quarkCacheFolder 是按需转存的落地目录名（避免污染网盘根目录）。
+const quarkCacheFolder = "ivideo"
+
+// cacheFolderFid 取缓存目录的 fid（没有就建），结果记住避免重复查。
+func (q *Quark) cacheFolderFid(ctx context.Context) (string, error) {
+	q.cacheDirMu.Lock()
+	if q.cacheDirFid != "" {
+		fid := q.cacheDirFid
+		q.cacheDirMu.Unlock()
+		return fid, nil
+	}
+	q.cacheDirMu.Unlock()
+
+	fid, err := q.ensureFolder(ctx, quarkCacheFolder)
+	if err != nil {
+		return "", err
+	}
+	q.cacheDirMu.Lock()
+	q.cacheDirFid = fid
+	q.cacheDirMu.Unlock()
+	return fid, nil
 }
