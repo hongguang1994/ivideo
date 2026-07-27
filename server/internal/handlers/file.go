@@ -109,23 +109,31 @@ const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 	clientRange := c.GetHeader("Range")
 
-	// 客户端要「开放式区间」(无 Range 或 bytes=N-)时不能原样转发：
-	// 夸克对没有上界的请求按慢速全量流限速（实测 0.1MB/s，带上界是 8~10MB/s），
-	// ffprobe 探测正是发 "bytes=0-"，这就是开播要等 ~20 秒的根源。
-	// 这里改为内部按 chunk 连续分段拉取，再拼成一条流喂给客户端。
-	if openEnded(clientRange) {
+	// 只有「完全不带 Range」才走分段：夸克对无上界请求按慢速全量流限速
+	// （实测 0.1MB/s，带上界 8~10MB/s），分段拉取可绕开。
+	// 而 "bytes=N-" 是播放器/ffprobe 的 seek，必须原样透传 ——
+	// 若也走分段，seek 到文件尾就要从 N 一路顺序拉到结尾（实测拉了 2.4GB），
+	// 既慢又会被客户端中途断开。
+	if clientRange == "" {
 		h.proxyChunked(c, upstream, ua, cookie, clientRange)
 		return
 	}
 
-	up, err := h.upstreamRange(c, upstream, ua, cookie, clientRange)
+	// "bytes=N-"（无上界的 seek）要补一个上界再发给夸克 —— 无上界会触发它的
+	// 慢速全量流限速。上界取 probeChunkBytes，足够 ffprobe 读取与播放器起播。
+	upRange := clientRange
+	if openEnded(upRange) {
+		var start int64
+		fmt.Sscanf(upRange, "bytes=%d-", &start)
+		upRange = fmt.Sprintf("bytes=%d-%d", start, start+probeChunkBytes-1)
+	}
+
+	up, err := h.upstreamRange(c, upstream, ua, cookie, upRange)
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
 		return
 	}
 	defer up.Body.Close()
-	slog.Info("代理Range", "客户端", clientRange, "上游状态", up.StatusCode,
-		"上游ContentRange", up.Header.Get("Content-Range"), "上游长度", up.Header.Get("Content-Length"))
 
 	copyStreamHeaders(c, up)
 	c.Status(up.StatusCode)
