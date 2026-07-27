@@ -17,9 +17,11 @@ function humanSize(n: number): string {
 
 // 从分享链接自动识别网盘类型（省得手动选错）。
 function detectProvider(url: string): string {
-  if (/pan\.quark\.cn/.test(url)) return "quark";
-  if (/115(cdn)?\.com\/s\//.test(url)) return "115";
-  return "aliyun";
+  const u = url.toLowerCase();
+  if (/quark\.cn|pan\.quark/.test(u)) return "quark";
+  if (/115\.com|115cdn\.com|anxia\.com/.test(u)) return "115";
+  if (/alipan\.com|aliyundrive\.com/.test(u)) return "aliyun";
+  return "aliyun"; // 兜底
 }
 
 export default function Browse() {
