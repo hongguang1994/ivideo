@@ -60,10 +60,16 @@ func (h *Handler) FileGateway(c *gin.Context) {
 	c.Header("X-Stream-Kind", string(res.Kind)) // original / hls：让外部看到实际给了哪种流
 	slog.Info("播放解析", "resource", id, "kind", res.Kind, "size", res.Item.Size)
 
-	// 115 直链是 UA 绑定的：播放器拿自己的 UA 去 302 目标会被 403。
-	// 所以 115 资源不 302，由 ivideo 用取直链时的同一 UA 拉流、透传 Range 后转发。
+	// 115 / 夸克的直链都不能 302 直跳给播放器：
+	//   115  —— 直链绑 UA，播放器 UA 不匹配会 403
+	//   夸克 —— 直链绑 cookie（每次取直链都会刷新 __puus），不带会被 CDN 拒（412）
+	// 两者都由 ivideo 用正确的 UA/cookie 拉流、透传 Range 后转发。
 	if strings.HasPrefix(res.Item.CachePath, "115:") {
-		h.proxyStream115(c, res.URL)
+		h.proxyStreamWith(c, res.URL, pan115UA, "")
+		return
+	}
+	if strings.HasPrefix(res.Item.CachePath, "quark:") {
+		h.proxyStreamWith(c, res.URL, quarkStreamUA, h.cache.StreamCookie(res.Item.CachePath))
 		return
 	}
 
@@ -81,22 +87,30 @@ const pan115UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 C
 
 var proxyClient = &http.Client{} // 流式转发，不设整体超时
 
-// proxyStream115 用固定 UA 拉上游直链并流式转发给客户端，透传 Range/关键响应头。
-// 专用于 115 这类 UA 绑定、不能 302 直跳的直链（与 handlers.go 里不带 UA 的
-// proxyStream 区分开，避免影响 OpenList/Jellyfin 那条既有链路）。
-func (h *Handler) proxyStream115(c *gin.Context, upstream string) {
+// quarkStreamUA 必须与夸克取直链时用的 UA 一致（夸克接口对 UA 敏感）。
+const quarkStreamUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+	"quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
+
+// proxyStreamWith 用指定 UA/cookie 拉上游直链并流式转发，透传 Range 与关键响应头。
+// 供 115（绑 UA）和夸克（绑 cookie）使用；与 handlers.go 里那个不带鉴权的
+// proxyStream 区分开，避免影响 OpenList/Jellyfin 既有链路。
+func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, upstream, nil)
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	req.Header.Set("User-Agent", pan115UA)
+	req.Header.Set("User-Agent", ua)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("Referer", "https://pan.quark.cn/")
+	}
 	if rng := c.GetHeader("Range"); rng != "" {
 		req.Header.Set("Range", rng) // 透传 Range，支持拖动/分段
 	}
 	up, err := proxyClient.Do(req)
 	if err != nil {
-		resp.Fail(c, http.StatusBadGateway, "115 拉流失败: "+err.Error())
+		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
 		return
 	}
 	defer up.Body.Close()

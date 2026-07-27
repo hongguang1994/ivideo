@@ -211,6 +211,18 @@ func (m *Manager) SaveShare(share ShareRef, srcPath, targetFolder string) error 
 // BackendName 返回当前缓存盘适配器名。
 func (m *Manager) BackendName() string { return m.backend.Name() }
 
+// StreamCookie 返回播放代理拉流时应带的 cookie（夸克需要；其他盘为空）。
+func (m *Manager) StreamCookie(cachePath string) string {
+	type cookieFor interface{ StreamCookieFor(string) string }
+	if p, ok := m.backend.(cookieFor); ok {
+		return p.StreamCookieFor(cachePath)
+	}
+	if p, ok := m.backend.(StreamCookieProvider); ok {
+		return p.StreamCookie()
+	}
+	return ""
+}
+
 // IsHLS 表示当前适配器的播放地址是否为 HLS。
 func (m *Manager) IsHLS() bool {
 	if p, ok := m.backend.(HLSStreamer); ok {

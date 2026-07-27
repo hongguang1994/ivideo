@@ -86,6 +86,13 @@ type MediaProber interface {
 	VideoDurationSeconds(ctx context.Context, cachePath string) (float64, error)
 }
 
+// StreamCookieProvider 是可选能力：直链需要携带 cookie 才能拉流（夸克）。
+// 播放代理用它拿到「取直链时刷新过的」cookie —— 夸克每次取直链都会下发新的
+// __puus，用旧值拉流会被 CDN 拒（412）。
+type StreamCookieProvider interface {
+	StreamCookie() string
+}
+
 // TokenRefresher 是可选能力：主动预热/续期令牌，保持令牌链活跃。
 // 实现应“未过期则命中缓存、不真刷”，从而定时调用是安全的。
 type TokenRefresher interface {

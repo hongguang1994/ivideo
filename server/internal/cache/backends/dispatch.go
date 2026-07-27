@@ -146,6 +146,15 @@ func (d *Dispatcher) SaveToFolder(ctx context.Context, share cache.ShareRef, src
 	return cache.ErrNotImplemented
 }
 
+// StreamCookieFor 返回某缓存路径对应盘的拉流 cookie（不支持则空串）。
+func (d *Dispatcher) StreamCookieFor(cachePath string) string {
+	b, _ := d.routeByPath(cachePath)
+	if p, ok := b.(cache.StreamCookieProvider); ok {
+		return p.StreamCookie()
+	}
+	return ""
+}
+
 // IsHLS 沿用默认盘的判断（阿里 HLS 语义；115 直链是文件，不受此影响）。
 func (d *Dispatcher) IsHLS() bool {
 	if p, ok := d.def.(cache.HLSStreamer); ok {

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"ivideo/server/internal/cache"
@@ -43,6 +44,23 @@ var reQuarkShare = regexp.MustCompile(`pan\.quark\.cn/s/([A-Za-z0-9]+)`)
 type Quark struct {
 	http   *http.Client
 	tokens TokenStore
+
+	// 夸克每次调 download 都会下发新的 __puus cookie，**拉流必须用刷新后的值**，
+	// 否则 CDN 返回 412（这正是之前播放不通的原因）。这里缓存最近一次刷新结果，
+	// 供播放代理取用。
+	streamMu     sync.Mutex
+	streamCookie string
+}
+
+// StreamCookie 返回拉流应使用的 cookie（download 刷新过的）。
+// 播放代理用它请求直链 —— 夸克直链绑 cookie，不能 302 直跳给播放器。
+func (q *Quark) StreamCookie() string {
+	q.streamMu.Lock()
+	defer q.streamMu.Unlock()
+	if q.streamCookie != "" {
+		return q.streamCookie
+	}
+	return q.cookie()
 }
 
 // NewQuark 创建夸克适配器。cookie 从 TokenStore(provider="quark_cookie") 读，
@@ -285,7 +303,77 @@ func (q *Quark) findOwnFileByName(ctx context.Context, name string) (string, int
 // 注意：夸克直链有强防盗链，实测服务端拉流恒返回 412（各种 UA/Cookie/Referer 组合均无效），
 // 故此处返回明确错误而非一个不可用的地址，避免上层反复重试。
 func (q *Quark) DirectURL(ctx context.Context, cachePath string) (string, error) {
-	return "", fmt.Errorf("夸克播放暂不可用（直链防盗链 412 未攻克）；文件已转存到你的夸克盘，可用夸克 App 观看")
+	ck := q.cookie()
+	if ck == "" {
+		return "", fmt.Errorf("未配置夸克 cookie，请在设置页扫码登录")
+	}
+	body, _ := json.Marshal(map[string]any{"fids": []string{cachePath}})
+	qs := url.Values{"pr": {"ucpro"}, "fr": {"pc"}, "uc_param_str": {""},
+		"__t": {fmt.Sprintf("%d", time.Now().UnixMilli())}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		quarkDriveBase+"/1/clouddrive/file/download?"+qs.Encode(), strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", QuarkUA)
+	req.Header.Set("Cookie", ck)
+	req.Header.Set("Referer", "https://pan.quark.cn/")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := q.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+
+	// **关键**：把响应里刷新的 cookie（尤其 __puus）合并进去，供拉流使用。
+	q.mergeStreamCookie(ck, resp.Cookies())
+
+	var out struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    []struct {
+			DownloadURL string `json:"download_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	if out.Code != 0 || len(out.Data) == 0 || out.Data[0].DownloadURL == "" {
+		return "", fmt.Errorf("夸克取直链失败: %s", out.Message)
+	}
+	return out.Data[0].DownloadURL, nil
+}
+
+// mergeStreamCookie 用响应下发的 Set-Cookie 覆盖原 cookie 里的同名项，存为拉流 cookie。
+func (q *Quark) mergeStreamCookie(base string, cookies []*http.Cookie) {
+	kv := map[string]string{}
+	order := []string{}
+	for _, part := range strings.Split(base, "; ") {
+		if i := strings.Index(part, "="); i > 0 {
+			k := strings.TrimSpace(part[:i])
+			if _, ok := kv[k]; !ok {
+				order = append(order, k)
+			}
+			kv[k] = part[i+1:]
+		}
+	}
+	for _, c := range cookies {
+		if c.Value == "" {
+			continue
+		}
+		if _, ok := kv[c.Name]; !ok {
+			order = append(order, c.Name)
+		}
+		kv[c.Name] = c.Value
+	}
+	parts := make([]string, 0, len(order))
+	for _, k := range order {
+		parts = append(parts, k+"="+kv[k])
+	}
+	q.streamMu.Lock()
+	q.streamCookie = strings.Join(parts, "; ")
+	q.streamMu.Unlock()
 }
 
 // Delete 删除自己盘里的文件（进回收站）。
