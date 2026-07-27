@@ -266,6 +266,10 @@ func (q *Quark) Transfer(ctx context.Context, share cache.ShareRef) (cache.Trans
 	if err != nil {
 		return cache.TransferResult{}, err
 	}
+	// 已经转存过就直接复用（Jellyfin 扫库/探测会反复触发，重复转存既慢又可能被夸克限流）。
+	if fid, size, err := q.findOwnFileByNameOnce(ctx, it.FileName); err == nil && fid != "" {
+		return cache.TransferResult{CachePath: fid, Size: size}, nil
+	}
 	if err := q.shareSave(ctx, pwdID, stoken, it, "0"); err != nil {
 		return cache.TransferResult{}, err
 	}
@@ -591,4 +595,29 @@ func (q *Quark) walkDir(ctx context.Context, pwdID, stoken, fid, prefix string, 
 		*out = append(*out, cache.ShareEntry{Name: it.FileName, Path: p, IsDir: false, Size: it.Size})
 	}
 	return nil
+}
+
+// findOwnFileByNameOnce 在自己盘根目录按文件名找一次（不重试），用于判断是否已转存过。
+func (q *Quark) findOwnFileByNameOnce(ctx context.Context, name string) (string, int64, error) {
+	var out struct {
+		Code int `json:"code"`
+		Data struct {
+			List []struct {
+				Fid      string `json:"fid"`
+				FileName string `json:"file_name"`
+				Size     int64  `json:"size"`
+			} `json:"list"`
+		} `json:"data"`
+	}
+	qs := url.Values{"pdir_fid": {"0"}, "_page": {"1"}, "_size": {"200"},
+		"_sort": {"file_type:asc,updated_at:desc"}}
+	if err := q.call(ctx, http.MethodGet, quarkDriveBase, "/1/clouddrive/file/sort", qs, nil, &out); err != nil {
+		return "", 0, err
+	}
+	for _, f := range out.Data.List {
+		if f.FileName == name {
+			return f.Fid, f.Size, nil
+		}
+	}
+	return "", 0, nil
 }
