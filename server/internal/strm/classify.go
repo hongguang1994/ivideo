@@ -76,6 +76,26 @@ func ParsePath(filePath, title string) MediaInfo {
 		}
 	}
 
+	// —— 剧集(无 Sxx 目录)：文件名是纯数字/第N集，父目录即剧名 —— //
+	// 例：/其它/开放式婚姻/03.mp4 → 剧名「开放式婚姻」第 3 集。
+	// 这类命名若按电影处理，Jellyfin 会拿「开放式婚姻 03」去 TMDB 搜，
+	// 数字乱匹配成不相干的电影（实测被刮成「钢铁侠3」等）。
+	if len(segs) >= 2 {
+		base := segs[len(segs)-1]
+		if ext := path.Ext(base); ext != "" {
+			base = strings.TrimSuffix(base, ext)
+		}
+		if ep, ok := plainEpisodeNo(base); ok {
+			return MediaInfo{
+				Kind:       KindEpisode,
+				Categories: segs[:len(segs)-2],
+				Title:      segs[len(segs)-2], // 父目录名即剧名
+				Season:     1,
+				Episode:    ep,
+			}
+		}
+	}
+
 	// —— 电影：文件名去扩展名作片名，之前的目录段是分类 —— //
 	name := title
 	var cats []string
@@ -111,4 +131,20 @@ func splitClean(p string) []string {
 		}
 	}
 	return out
+}
+
+// rePlainEp 匹配纯数字或「第N集」形式的分集文件名。
+var rePlainEp = regexp.MustCompile(`^(?:第)?(\d{1,3})(?:集|话|話)?$`)
+
+// plainEpisodeNo 判断文件名是否是「纯数字分集」，是则返回集号。
+func plainEpisodeNo(base string) (int, bool) {
+	m := rePlainEp.FindStringSubmatch(strings.TrimSpace(base))
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
