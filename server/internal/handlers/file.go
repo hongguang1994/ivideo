@@ -87,9 +87,12 @@ const pan115UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 C
 
 var proxyClient = &http.Client{} // 流式转发，不设整体超时
 
-// probeChunkBytes 是客户端未指定 Range 时，向上游请求的区间大小。
-// 取 32MB：足够 ffprobe 解析媒体信息，又能走夸克的分段快通道。
-const probeChunkBytes = 32 << 20
+// probeChunkBytes 是补全「开放式 Range」时向上游请求的区间大小。
+// 夸克的限速有两头：没有上界会走慢通道(0.1MB/s)，上界过大(实测 ≥512MB)同样掉回慢通道；
+// 中间区段才是快通道(实测 32MB→10.6MB/s、256MB→11.7MB/s)。
+// 取 256MB：既在快通道内，又让播放器约每 4~5 分钟才需重新发一次 Range 请求
+// （取 32MB 时每 35 秒就要重连一次，会周期性卡顿）。
+const probeChunkBytes = 256 << 20
 
 // boundedEnd 算出 Range 的上界，并**钳制在文件末尾之内**。
 // 关键：夸克/OSS 在上界超出文件大小时会**忽略整个 Range**、从头返回全量（实测
