@@ -62,17 +62,13 @@ func (m *Manager) cleanupOnce(ttlHours int, maxBytes int64, stopGraceSec int64) 
 			continue
 		}
 
-		// 停止感知淘汰：不在任何会话里 + 宽限期过了 → 删。
-		if sessionOK && stopGraceSec > 0 {
-			first := m.stoppedAt[it.ResourceID]
-			if first == 0 {
-				m.stoppedAt[it.ResourceID] = now
-				first = now
-			}
-			if now-first >= stopGraceSec {
+		// 停止感知淘汰：不在任何会话里 + 距上次访问超过宽限期 → 删。
+		// 用库里的 last_access（每次播放请求都会 Touch）而非内存计时器：
+		// 内存计时器一重启就清零，服务频繁重启时清理永远走不完一轮。
+		if sessionOK && stopGraceSec > 0 && it.LastAccess > 0 {
+			if now-it.LastAccess >= stopGraceSec {
 				if m.evict(it) {
 					deleted = true
-					delete(m.stoppedAt, it.ResourceID)
 				}
 				continue
 			}
