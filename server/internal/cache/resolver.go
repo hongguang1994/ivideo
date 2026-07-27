@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"ivideo/server/internal/store"
 )
@@ -56,7 +57,32 @@ func (m *Manager) Resolve(resourceID int64, kind StreamKind) (Resolution, error)
 	}
 
 	// —— 决策③:去哪取、取什么流?——
-	// 原画:适配器实现了 OriginalURLProvider 才走;否则回退到转码。
+	res, err := m.resolveURL(ctx, kind, item)
+	if err == nil {
+		return res, nil
+	}
+	// 网盘上的文件已不在（被即删清理、手动删除或移动过），但库里仍标着 ready ——
+	// 此时缓存记录已失效，作废它并重新转存一次，然后重试。
+	// 不自愈的话每次播放都会拿着失效 ID 去取直链，一直失败（播放器会直接报错）。
+	if !isGoneErr(err) {
+		return Resolution{}, err
+	}
+	slog.Warn("缓存文件已不在网盘，作废并重新转存", "resource", resourceID, "err", err)
+	if e := m.store.MarkCleaned(resourceID); e != nil {
+		return Resolution{}, err
+	}
+	item, e := m.WaitReady(resourceID, transferWaitTimeout)
+	if e != nil {
+		return Resolution{}, e
+	}
+	if item.Status != store.StatusReady || item.CachePath == "" {
+		return Resolution{}, fmt.Errorf("资源尚未就绪（%s）", item.Status)
+	}
+	return m.resolveURL(ctx, kind, item)
+}
+
+// resolveURL 按 kind 取可播地址：原画优先（适配器支持时），否则转码流。
+func (m *Manager) resolveURL(ctx context.Context, kind StreamKind, item store.CacheItem) (Resolution, error) {
 	if kind == KindOriginal {
 		if p, ok := m.backend.(OriginalURLProvider); ok {
 			url, err := p.OriginalURL(ctx, item.CachePath)
@@ -65,15 +91,27 @@ func (m *Manager) Resolve(resourceID int64, kind StreamKind) (Resolution, error)
 			}
 			return Resolution{URL: url, Kind: KindOriginal, Item: item}, nil
 		}
-		// 不支持原画 → 落到下面的转码分支。
+		// 不支持原画 → 落到转码分支。
 	}
-
-	// 转码 HLS(默认 / 原画回退)。
 	url, err := m.backend.DirectURL(ctx, item.CachePath)
 	if err != nil {
 		return Resolution{}, err
 	}
 	return Resolution{URL: url, Kind: KindHLS, Item: item}, nil
+}
+
+// isGoneErr 判断错误是否为「网盘上找不到该文件」（各网盘文案不同，按关键词匹配）。
+func isGoneErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, kw := range []string{"file not found", "not found", "不存在", "已被删除", "notfound"} {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // originalTooBig 判断「这个片源的码率是否超出原画通道的带宽能力」。
