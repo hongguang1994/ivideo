@@ -105,9 +105,15 @@ func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 		req.Header.Set("Cookie", cookie)
 		req.Header.Set("Referer", "https://pan.quark.cn/")
 	}
-	if rng := c.GetHeader("Range"); rng != "" {
-		req.Header.Set("Range", rng) // 透传 Range，支持拖动/分段
+	// Range 处理：客户端给了就透传；没给也主动带 "bytes=0-"。
+	// 夸克对**不带 Range** 的请求返回慢速全量流（实测 ffprobe 探测因此拖到 ~20 秒，
+	// 而带 Range 只要 0.5 秒），带上后走分段快通道。
+	clientRange := c.GetHeader("Range")
+	rng := clientRange
+	if rng == "" {
+		rng = "bytes=0-"
 	}
+	req.Header.Set("Range", rng)
 	up, err := proxyClient.Do(req)
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
@@ -120,6 +126,13 @@ func (h *Handler) proxyStreamWith(c *gin.Context, upstream, ua, cookie string) {
 			c.Header(hk, v)
 		}
 	}
-	c.Status(up.StatusCode)
+	status := up.StatusCode
+	// 客户端没要 Range，但我们为了走快通道向上游要了 —— 对外仍应是完整响应 200，
+	// 且不该带 Content-Range，否则播放器会以为这是分段。
+	if clientRange == "" && status == http.StatusPartialContent {
+		c.Writer.Header().Del("Content-Range")
+		status = http.StatusOK
+	}
+	c.Status(status)
 	_, _ = io.Copy(c.Writer, up.Body)
 }
