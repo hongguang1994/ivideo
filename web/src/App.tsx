@@ -23,6 +23,7 @@ const Settings = lazy(() => import("./pages/Settings"));
 const SettingsLayout = lazy(() => import("./pages/settings/SettingsLayout"));
 const ShareSettings = lazy(() => import("./pages/settings/ShareSettings"));
 const SearchSettings = lazy(() => import("./pages/settings/SearchSettings"));
+const RSSSettings = lazy(() => import("./pages/settings/RSSSettings"));
 const Logs = lazy(() => import("./pages/settings/Logs"));
 const ImportSettings = lazy(() => import("./pages/settings/ImportSettings"));
 const MediaOrganizer = lazy(() => import("./pages/settings/MediaOrganizer"));
@@ -119,6 +120,7 @@ export default function App() {
               <Route path="organizer" element={<MediaOrganizer />} />
               <Route path="import" element={<ImportSettings />} />
               <Route path="search" element={<SearchSettings />} />
+              <Route path="rss" element={<RSSSettings />} />
               <Route path="shares" element={<Shares />} />
               <Route path="shares/browse" element={<Browse embedded />} />
               <Route path="share-preferences" element={<ShareSettings />} />

@@ -429,6 +429,52 @@ export function deleteGitHubToken(): Promise<SearchSettingsStatus> {
   return apiFetch<SearchSettingsStatus>("/settings/search/github", { method: "DELETE" });
 }
 
+export interface RSSFeed {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  fetchArticle: boolean;
+}
+
+export interface RSSSchedule {
+  enabled: boolean;
+  intervalMinutes: number;
+}
+
+export interface RSSCollectionStatus {
+  running: boolean;
+  feeds: number;
+  discovered: number;
+  added: number;
+  existing: number;
+  lastError: string;
+  startedAt: number;
+  finishedAt: number;
+}
+
+export interface RSSSettingsStatus {
+  feeds: RSSFeed[];
+  schedule: RSSSchedule;
+  status: RSSCollectionStatus;
+}
+
+export function getRSSSettings(): Promise<RSSSettingsStatus> {
+  return apiFetch<RSSSettingsStatus>("/settings/search/rss");
+}
+
+export function saveRSSSettings(feeds: RSSFeed[], schedule: RSSSchedule): Promise<RSSSettingsStatus> {
+  return apiFetch<RSSSettingsStatus>("/settings/search/rss", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feeds, schedule }),
+  });
+}
+
+export function runRSSCollection(): Promise<{ started: boolean; status: RSSCollectionStatus }> {
+  return post<{ started: boolean; status: RSSCollectionStatus }>("/settings/search/rss/run");
+}
+
 export function updateShare(id: number, s: Partial<Share>): Promise<unknown> {
   return apiFetch(`/shares/${id}`, {
     method: "PUT",

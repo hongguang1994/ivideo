@@ -18,7 +18,7 @@ flowchart LR
     Publisher --> MediaDir["data/media"]
     MediaDir --> Jellyfin["Jellyfin"]
     Cache --> Drives["阿里 / 115 / 夸克"]
-    Discovery --> PublicSources["GitHub / Telegram / 本地目录"]
+    Discovery --> PublicSources["GitHub / Telegram / RSS-Atom / 本地目录"]
     API --> Store["store 接口"]
     Importer --> Store
     Metadata --> Store
@@ -74,6 +74,8 @@ flowchart LR
 ### 新增资源发现来源
 
 实现 `resourcesearch.Source`，在 `buildDiscovery` 注册。每个来源声明稳定 ID、类型、说明、优先级和独立超时；引擎统一提供并发、缓存、结果合并、健康状态以及运行时启停。启停状态保存在 `app_settings`，重启后仍然生效。来源插件只返回 `SourceResult` 原始候选，不直接决定最终来源标识和置信度，也不直接收藏、导入或生成 STRM。引擎在统一标准化边界中处理网盘类型、链接、标题依据、匹配证据、评分、去重和可用性，最终输出稳定的 `Result`。
+
+RSS / Atom 是一个后台采集型来源：`RSSSource` 从 `app_settings` 读取订阅配置，提取条目正文中的分享链接，并可选读取同站文章页。采集任务将标准化候选幂等同步到 `share_sources`，因此后续本地搜索不会依赖订阅源实时响应。文章页最多读取 20 篇，且限制为订阅源同一主机，避免把资源发现变成无边界爬虫。
 
 ### 新增网盘
 

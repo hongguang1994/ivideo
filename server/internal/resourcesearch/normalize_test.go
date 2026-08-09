@@ -7,7 +7,7 @@ import (
 )
 
 func TestNormalizeSourceResultCreatesStableAPIIdentity(t *testing.T) {
-	item, ok := normalizeSourceResult(SourceResult{
+	item, ok := NormalizeSourceResult(SourceResult{
 		Provider: "alipan", ShareURL: " HTTPS://PAN.QUARK.CN/s/Token?password=9x2a&amp;from=share ",
 		Title: "师兄啊师兄", TitleBasis: TitleBasisMessage, SourceName: "@movies",
 		Evidence: []string{"telegram:message-text"},
@@ -36,7 +36,7 @@ func TestNormalizeSourceResultCreatesStableAPIIdentity(t *testing.T) {
 }
 
 func TestNormalizeSourceResultMarksQueryFallbackAsLowConfidence(t *testing.T) {
-	item, ok := normalizeSourceResult(SourceResult{
+	item, ok := NormalizeSourceResult(SourceResult{
 		Provider: "115", ShareURL: "https://115.com/s/share-id",
 	}, "流浪地球", SourceDescriptor{ID: "github-code", Name: "GitHub"})
 	if !ok {

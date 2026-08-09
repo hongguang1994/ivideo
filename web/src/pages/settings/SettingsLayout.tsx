@@ -1,4 +1,4 @@
-import { Database, Download, FolderHeart, KeyRound, LayoutGrid, ListChecks, ScrollText, SearchCode, Server, SlidersHorizontal } from "lucide-react";
+import { Database, Download, FolderHeart, KeyRound, LayoutGrid, ListChecks, Rss, ScrollText, SearchCode, Server, SlidersHorizontal } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 const ITEMS = [
@@ -9,6 +9,7 @@ const ITEMS = [
   { to: "/settings/organizer", label: "媒体整理", icon: ListChecks },
   { to: "/settings/import", label: "资源导入", icon: Download },
   { to: "/settings/search", label: "搜索来源", icon: SearchCode },
+  { to: "/settings/rss", label: "RSS 订阅源", icon: Rss },
   { to: "/settings/shares", label: "分享库管理", icon: FolderHeart },
   { to: "/settings/share-preferences", label: "分享偏好", icon: SlidersHorizontal },
   { to: "/settings/logs", label: "运行日志", icon: ScrollText },

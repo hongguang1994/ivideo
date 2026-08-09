@@ -4,7 +4,7 @@ ivideo 是一个面向内网自用场景的网盘媒体工作台。它从公开�
 
 ## 当前能力
 
-- 多来源资源发现：本地目录、GitHub 公开仓库适配器、Telegram 公开频道。
+- 多来源资源发现：本地目录、GitHub 公开仓库、Telegram 公开频道和可定时采集的 RSS / Atom 订阅源。
 - 分享库管理：收藏、批量录入、目录浏览、有效性检测和定时检查。
 - 三网盘适配：阿里云盘、115、夸克的授权、分享浏览、转存和播放。
 - 按需缓存：播放时转存，支持 LRU、容量、闲置时间和 Jellyfin 会话感知清理。
@@ -42,7 +42,7 @@ cp server/configs/conf.example.yaml data/server/conf.yaml
 docker compose up -d --build
 ```
 
-4. 打开 `http://<服务器IP>:8090`，在右上角设置中心完成网盘、Jellyfin、TMDb 和 GitHub 授权。
+4. 打开 `http://<服务器IP>:8090`，在右上角设置中心完成网盘、Jellyfin、TMDb、GitHub 和 RSS 订阅配置。
 
 运行参数、升级和排障步骤见 [部署与运维](docs/operations.md)。
 

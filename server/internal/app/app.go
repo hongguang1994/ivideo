@@ -53,13 +53,14 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	slog.Info("缓存盘适配器已就绪", "backend", backend.Name())
 
 	importService, metadataService, workflowService := buildMediaModules(cfg, st, cm, jf)
-	discovery := buildDiscovery(cfg, st, cm, metadataService)
-	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery)
+	discovery, rssSource := buildDiscovery(cfg, st, cm, metadataService)
+	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery, rssSource)
 
 	// strm 媒体库自动维护：启动时生成一次 + 定时兜底（导入完成后也会即时触发）。
 	h.StartAutoStrm(cfg.StrmAutoInterval)
 	h.StartShareChecks(cfg.ShareCheckInterval)
 	h.StartImportScheduler()
+	h.StartRSSScheduler()
 	if jf != nil {
 		if err := jf.EnsureLibraries(cfg.MediaDir); err != nil {
 			slog.Warn("确保 Jellyfin 媒体库失败", "err", err)

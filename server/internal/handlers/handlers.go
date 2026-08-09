@@ -35,10 +35,14 @@ type Handler struct {
 	metadata       *metadata.Service
 	workflow       *mediaworkflow.Service
 	discovery      *resourcesearch.Engine
+	rssSource      *resourcesearch.RSSSource
 	shareCheckMu   sync.Mutex
 	importRunMu    sync.Mutex
+	rssRunMu       sync.Mutex
 	importStatusMu sync.RWMutex
 	importStatus   importTaskStatus
+	rssStatusMu    sync.RWMutex
+	rssStatus      rssCollectionStatus
 	importCursor   int
 }
 
@@ -59,11 +63,11 @@ func logShareCheck(message string, args ...any) { slog.Info(message, args...) }
 func New(
 	cfg config.Config, ol *openlist.Client, jf *jellyfin.Client, st Repository, cm *cache.Manager,
 	importService *importer.Service, metadataService *metadata.Service, workflowService *mediaworkflow.Service,
-	discovery *resourcesearch.Engine,
+	discovery *resourcesearch.Engine, rssSource *resourcesearch.RSSSource,
 ) *Handler {
 	return &Handler{
 		cfg: cfg, ol: ol, jf: jf, store: st, cache: cm,
-		importer: importService, metadata: metadataService, workflow: workflowService, discovery: discovery,
+		importer: importService, metadata: metadataService, workflow: workflowService, discovery: discovery, rssSource: rssSource,
 	}
 }
 

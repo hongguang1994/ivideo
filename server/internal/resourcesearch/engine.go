@@ -332,7 +332,7 @@ func (e *Engine) searchAll(ctx context.Context, query, cacheKey string, onUpdate
 			meta.Warnings = append(meta.Warnings, result.info.Name+": "+result.err.Error())
 		} else {
 			for _, raw := range result.items {
-				item, ok := normalizeSourceResult(raw, query, result.info)
+				item, ok := NormalizeSourceResult(raw, query, result.info)
 				if ok {
 					all = append(all, item)
 				}

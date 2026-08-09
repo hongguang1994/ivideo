@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// normalizeSourceResult is the single boundary between source-specific parsing
+// NormalizeSourceResult is the single boundary between source-specific parsing
 // and the stable API model returned by the discovery engine.
-func normalizeSourceResult(raw SourceResult, query string, source SourceDescriptor) (Result, bool) {
+func NormalizeSourceResult(raw SourceResult, query string, source SourceDescriptor) (Result, bool) {
 	raw.Provider = normalizeProvider(raw.Provider)
 	raw.ShareURL = normalizeShareURL(raw.ShareURL)
 	if detected := detectProvider(raw.ShareURL); detected != "" {

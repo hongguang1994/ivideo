@@ -470,6 +470,18 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .search-source-copy strong { font-size: 14px; }
 .search-source-copy span { color: var(--muted); font-size: 12px; }
 .search-token-form { display: grid; grid-column: 2 / -1; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.rss-feed-list { display: flex; flex-direction: column; }
+.rss-feed-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 36px; align-items: center; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.rss-feed-fields { display: grid; grid-template-columns: minmax(150px, .35fr) minmax(0, 1fr); gap: 8px; }
+.rss-feed-row > button { width: 34px; min-height: 34px; padding: 0; }
+.rss-empty { padding: 24px 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.rss-feed-actions { display: flex; padding: 12px 18px; }
+.rss-status-body { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.rss-status-body > div:not(.settings-notice) { display: flex; min-height: 78px; flex-direction: column; justify-content: center; gap: 4px; padding: 14px 18px; border-right: 1px solid var(--line); }
+.rss-status-body > div strong { font-size: 22px; }
+.rss-status-body > div span { color: var(--muted); font-size: 12px; }
+.rss-status-body .settings-notice { grid-column: 1 / -1; margin: 14px 18px 0; }
+.rss-status-body > a { display: inline-flex; align-items: center; gap: 6px; width: max-content; padding: 15px 18px; color: var(--accent); font-size: 12px; font-weight: 650; }
 .logs-page { gap: 14px; }
 .log-console { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
 .log-toolbar { display: flex; min-height: 58px; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: #fafafa; }
@@ -544,6 +556,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .provider-token-form { grid-template-columns: 1fr; }
   .settings-form-row { grid-template-columns: 1fr; gap: 10px; }
   .settings-toggle-row { grid-template-columns: minmax(0, 1fr) auto; }
+	.rss-feed-row { grid-template-columns: minmax(0, 1fr) auto 36px; }
+	.rss-feed-fields { grid-template-columns: 1fr; }
+	.rss-article-toggle { grid-column: 1; }
+	.rss-status-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .service-section { min-height: 0; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
   .browse-row { flex-wrap: wrap; }

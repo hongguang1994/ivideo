@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path"
 	"strconv"
@@ -50,7 +51,7 @@ func buildMediaModules(cfg config.Config, st store.Store, cm *cache.Manager, jf 
 	return importService, metadataService, workflow
 }
 
-func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metadataService *metadata.Service) *resourcesearch.Engine {
+func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metadataService *metadata.Service) (*resourcesearch.Engine, *resourcesearch.RSSSource) {
 	// 每个来源是独立插件；引擎统一处理并发、超时、缓存、去重和健康状态。
 	engine := resourcesearch.NewEngine(resourcesearch.EngineOptions{
 		Concurrency: cfg.DiscoveryConcurrency,
@@ -136,6 +137,10 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 		},
 	})
 	engine.Register(resourcesearch.NewTelegramSource(cfg.DiscoveryTelegramChannels))
+	rssSource := resourcesearch.NewRSSSource(func(context.Context) ([]resourcesearch.RSSFeed, error) {
+		return loadRSSFeeds(st)
+	})
+	engine.Register(rssSource)
 	for _, source := range engine.Status() {
 		raw, found, err := st.GetSetting(resourcesearch.SourceEnabledSettingKey(source.ID))
 		if err != nil || !found {
@@ -147,7 +152,19 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 		}
 	}
 	engine.SetVerifier(discoveryVerifier{manager: cm})
-	return engine
+	return engine, rssSource
+}
+
+func loadRSSFeeds(st store.SettingsRepository) ([]resourcesearch.RSSFeed, error) {
+	raw, found, err := st.GetSetting(resourcesearch.RSSFeedsSettingKey)
+	if err != nil || !found || strings.TrimSpace(raw) == "" {
+		return []resourcesearch.RSSFeed{}, err
+	}
+	var feeds []resourcesearch.RSSFeed
+	if err := json.Unmarshal([]byte(raw), &feeds); err != nil {
+		return nil, err
+	}
+	return feeds, nil
 }
 
 type discoveryVerifier struct{ manager *cache.Manager }
