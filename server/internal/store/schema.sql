@@ -40,12 +40,13 @@ CREATE TABLE IF NOT EXISTS github_repository_files (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     repository_id     INTEGER NOT NULL,
     path              TEXT    NOT NULL,
+    path_key          TEXT    NOT NULL,
     blob_sha          TEXT    NOT NULL,
     size              INTEGER NOT NULL DEFAULT 0,
     active            INTEGER NOT NULL DEFAULT 1,
     last_collected_at INTEGER NOT NULL DEFAULT 0,
     last_error        TEXT    NOT NULL DEFAULT '',
-    UNIQUE (repository_id, path),
+    UNIQUE (repository_id, path_key),
     FOREIGN KEY (repository_id) REFERENCES github_repositories (id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_github_files_repository_active ON github_repository_files (repository_id, active);

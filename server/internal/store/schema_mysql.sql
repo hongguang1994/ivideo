@@ -50,12 +50,13 @@ CREATE TABLE IF NOT EXISTS github_repository_files (
     id                BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     repository_id     BIGINT NOT NULL,
     path              VARCHAR(1024) NOT NULL,
+    path_key          CHAR(64) NOT NULL,
     blob_sha          CHAR(64) NOT NULL,
     size              BIGINT NOT NULL DEFAULT 0,
     active            TINYINT(1) NOT NULL DEFAULT 1,
     last_collected_at BIGINT NOT NULL DEFAULT 0,
     last_error        VARCHAR(1024) NOT NULL DEFAULT '',
-    UNIQUE KEY uniq_github_repository_file (repository_id, path),
+    UNIQUE KEY uniq_github_repository_file (repository_id, path_key),
     INDEX idx_github_files_repository_active (repository_id, active),
     CONSTRAINT fk_github_files_repository FOREIGN KEY (repository_id) REFERENCES github_repositories (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

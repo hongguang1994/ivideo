@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -80,6 +82,10 @@ type GitHubCollectionResult struct {
 	FilesUpdated int `json:"filesUpdated"`
 	SharesAdded  int `json:"sharesAdded"`
 	SharesKnown  int `json:"sharesKnown"`
+}
+
+func githubRepositoryPathKey(filePath string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(filePath)))
 }
 
 func scanGitHubRepository(sc rowScanner) (GitHubRepository, error) {
@@ -166,8 +172,8 @@ func (s *sqlStore) ApplyGitHubRepositorySnapshot(snapshot GitHubRepositorySnapsh
 		var fileID int64
 		err := tx.QueryRow(`SELECT id FROM github_repository_files WHERE repository_id=? AND path=?`, repositoryID, collected.Path).Scan(&fileID)
 		if err == sql.ErrNoRows {
-			res, insertErr := tx.Exec(`INSERT INTO github_repository_files (repository_id, path, blob_sha, size, active, last_collected_at, last_error)
-				VALUES (?, ?, ?, ?, 1, ?, ?)`, repositoryID, collected.Path, collected.BlobSHA, collected.Size, now, collected.ParseError)
+			res, insertErr := tx.Exec(`INSERT INTO github_repository_files (repository_id, path, path_key, blob_sha, size, active, last_collected_at, last_error)
+				VALUES (?, ?, ?, ?, ?, 1, ?, ?)`, repositoryID, collected.Path, githubRepositoryPathKey(collected.Path), collected.BlobSHA, collected.Size, now, collected.ParseError)
 			if insertErr != nil {
 				return result, insertErr
 			}
