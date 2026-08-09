@@ -49,7 +49,7 @@ func buildMediaModules(cfg config.Config, st store.Store, cm *cache.Manager, jf 
 	return importService, metadataService, workflow
 }
 
-func buildDiscovery(cfg config.Config, st store.Store, metadataService *metadata.Service) *resourcesearch.Engine {
+func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metadataService *metadata.Service) *resourcesearch.Engine {
 	// 每个来源是独立插件；引擎统一处理并发、超时、缓存、去重和健康状态。
 	engine := resourcesearch.NewEngine(resourcesearch.EngineOptions{
 		Concurrency: cfg.DiscoveryConcurrency,
@@ -126,7 +126,31 @@ func buildDiscovery(cfg config.Config, st store.Store, metadataService *metadata
 		},
 	})
 	engine.Register(resourcesearch.NewTelegramSource(cfg.DiscoveryTelegramChannels))
+	engine.SetVerifier(discoveryVerifier{manager: cm})
 	return engine
+}
+
+type discoveryVerifier struct{ manager *cache.Manager }
+
+func (v discoveryVerifier) Verify(ctx context.Context, result resourcesearch.Result) resourcesearch.Verification {
+	checkedAt := time.Now()
+	entries, err := v.manager.ListShareContext(ctx, cache.ShareRef{
+		Provider: result.Provider, ShareURL: result.ShareURL, SharePwd: result.SharePwd,
+	}, "")
+	if err == nil {
+		if len(entries) == 0 {
+			return resourcesearch.Verification{Status: resourcesearch.AvailabilityEmpty, Message: "分享目录为空", At: checkedAt}
+		}
+		return resourcesearch.Verification{Status: resourcesearch.AvailabilityAvailable, Count: len(entries), At: checkedAt}
+	}
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	for _, marker := range []string{"429", "too many requests", "timeout", "deadline exceeded", "temporarily", "502", "503", "504", "not implemented", "未配置", "未授权", "cookie", "token"} {
+		if strings.Contains(lower, marker) {
+			return resourcesearch.Verification{Status: resourcesearch.AvailabilityUnknown, Message: message, At: checkedAt}
+		}
+	}
+	return resourcesearch.Verification{Status: resourcesearch.AvailabilityInvalid, Message: message, At: checkedAt}
 }
 
 type importerShareSource struct{ manager *cache.Manager }

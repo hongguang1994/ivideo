@@ -107,6 +107,65 @@ func TestEngineKeepsPartialResultsWhenSourceFails(t *testing.T) {
 	}
 }
 
+type verifierFunc func(context.Context, Result) Verification
+
+func (f verifierFunc) Verify(ctx context.Context, result Result) Verification { return f(ctx, result) }
+
+func TestEngineFiltersEmptyAndInvalidSharesAfterVerification(t *testing.T) {
+	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
+		Info: SourceDescriptor{ID: "source", Name: "测试来源"},
+		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+			return []Result{
+				{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/available", Title: "测试"},
+				{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/empty", Title: "测试"},
+				{Provider: "quark", ShareURL: "https://pan.quark.cn/s/unknown", Title: "测试"},
+			}, Meta{}, nil
+		},
+	})
+	engine.SetVerifier(verifierFunc(func(_ context.Context, result Result) Verification {
+		switch {
+		case strings.Contains(result.ShareURL, "available"):
+			return Verification{Status: AvailabilityAvailable, Count: 2}
+		case strings.Contains(result.ShareURL, "empty"):
+			return Verification{Status: AvailabilityEmpty}
+		default:
+			return Verification{Status: AvailabilityUnknown, Message: "限流"}
+		}
+	}))
+
+	items, meta, err := engine.Search(context.Background(), "测试", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || meta.Verified != 1 || meta.Rejected != 1 || meta.Unverified != 1 {
+		t.Fatalf("unexpected verification result: items=%#v meta=%#v", items, meta)
+	}
+	for _, item := range items {
+		if strings.Contains(item.ShareURL, "empty") {
+			t.Fatalf("empty share was not filtered: %#v", item)
+		}
+	}
+}
+
+func TestEngineCachesShareVerificationAcrossQueries(t *testing.T) {
+	var checks atomic.Int32
+	engine := NewEngine(EngineOptions{CacheTTL: time.Millisecond, VerificationTTL: time.Minute}, SourceFunc{
+		Info: SourceDescriptor{ID: "source", Name: "测试来源"},
+		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+			return []Result{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/same", Title: "测试"}}, Meta{}, nil
+		},
+	})
+	engine.SetVerifier(verifierFunc(func(context.Context, Result) Verification {
+		checks.Add(1)
+		return Verification{Status: AvailabilityAvailable, Count: 1}
+	}))
+	_, _, _ = engine.Search(context.Background(), "测试一", true)
+	_, _, _ = engine.Search(context.Background(), "测试二", true)
+	if checks.Load() != 1 {
+		t.Fatalf("verification cache was not used: %d", checks.Load())
+	}
+}
+
 func TestProgressiveSearchReturnsFastThenPublishesCompletion(t *testing.T) {
 	engine := NewEngine(EngineOptions{Timeout: time.Second, CacheTTL: time.Minute},
 		SourceFunc{

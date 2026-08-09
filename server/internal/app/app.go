@@ -53,7 +53,7 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	slog.Info("缓存盘适配器已就绪", "backend", backend.Name())
 
 	importService, metadataService, workflowService := buildMediaModules(cfg, st, cm, jf)
-	discovery := buildDiscovery(cfg, st, metadataService)
+	discovery := buildDiscovery(cfg, st, cm, metadataService)
 	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery)
 
 	// strm 媒体库自动维护：启动时生成一次 + 定时兜底（导入完成后也会即时触发）。

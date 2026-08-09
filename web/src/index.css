@@ -456,6 +456,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .discover-result-title strong { overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .discover-result-title .badge { margin-left: 0; }
 .discover-result-main > a { display: block; overflow: hidden; margin-top: 5px; color: var(--accent); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.discover-link-pending { display: block; margin-top: 5px; color: var(--muted); font-size: 13px; }
 .discover-result-main .sub { overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
 .search-source-body { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 18px; }
 .search-source-health-list { display: flex; flex-direction: column; }

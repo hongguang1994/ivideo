@@ -15,6 +15,12 @@ const PROVIDER_LABEL: Record<string, string> = {
   quark: "夸克网盘",
 };
 
+const AVAILABILITY_LABEL: Record<string, string> = {
+  checking: "核验中",
+  available: "有内容",
+  unknown: "暂未核验",
+};
+
 export default function Discover({ variant = "search", showHeader = true }: { variant?: "search" | "github"; showHeader?: boolean }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = (searchParams.get("q") || "").trim();
@@ -99,8 +105,9 @@ export default function Discover({ variant = "search", showHeader = true }: { va
   }, [query]);
 
   const items = response?.items || [];
-  const selectedItems = useMemo(() => items.filter((item) => selected.has(item.shareUrl)), [items, selected]);
-  const allSelected = items.length > 0 && selectedItems.length === items.length;
+  const selectableItems = useMemo(() => items.filter((item) => item.availability !== "checking"), [items]);
+  const selectedItems = useMemo(() => selectableItems.filter((item) => selected.has(item.shareUrl)), [selectableItems, selected]);
+  const allSelected = selectableItems.length > 0 && selectedItems.length === selectableItems.length;
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -121,7 +128,7 @@ export default function Discover({ variant = "search", showHeader = true }: { va
     });
   };
 
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(items.map((item) => item.shareUrl)));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableItems.map((item) => item.shareUrl)));
 
   const collect = async () => {
     setSaving(true);
@@ -162,6 +169,7 @@ export default function Discover({ variant = "search", showHeader = true }: { va
           <span><DatabaseZap size={16} /> ivideo 资源发现引擎</span>
           <span>{response.meta.sources?.filter((source) => source.healthy).length || 0}/{response.meta.sources?.length || 0} 个来源完成</span>
           <span>找到 {items.length} 条分享</span>
+          {Boolean(response.meta.verified) && <span>已核验 {response.meta.verified} 条</span>}
           <span>{response.meta.cached ? "命中缓存" : `耗时 ${response.meta.durationMs || 0} ms`}</span>
 		  {response.pending && <span className="discover-pending"><LoaderCircle size={16} />后台继续搜索</span>}
         </div>
@@ -188,13 +196,16 @@ export default function Discover({ variant = "search", showHeader = true }: { va
 }
 
 function SearchResultRow({ item, checked, onToggle }: { item: SearchResource; checked: boolean; onToggle: () => void }) {
+  const checking = item.availability === "checking";
   return (
     <div className={`discover-result-row${checked ? " selected" : ""}`}>
-      <button className="discover-check" onClick={onToggle} aria-label={checked ? "取消选择" : "选择"}>{checked ? <CheckSquare size={20} /> : <Square size={20} />}</button>
+      <button className="discover-check" onClick={onToggle} disabled={checking} aria-label={checking ? "正在核验" : checked ? "取消选择" : "选择"}>{checking ? <LoaderCircle size={20} /> : checked ? <CheckSquare size={20} /> : <Square size={20} />}</button>
       <div className="discover-result-main">
-        <div className="discover-result-title"><strong>{item.title}</strong><span className="badge badge-off">{PROVIDER_LABEL[item.provider] || item.provider}</span></div>
-        <a href={item.shareUrl} target="_blank" rel="noreferrer">{item.shareUrl}</a>
+        <div className="discover-result-title"><strong>{item.title}</strong><span className="badge badge-off">{PROVIDER_LABEL[item.provider] || item.provider}</span>{item.availability && <span className={`badge ${item.availability === "available" ? "badge-ok" : "badge-off"}`}>{AVAILABILITY_LABEL[item.availability] || item.availability}</span>}</div>
+        {checking ? <span className="discover-link-pending">核验完成后可打开分享链接</span> : <a href={item.shareUrl} target="_blank" rel="noreferrer">{item.shareUrl}</a>}
         <div className="sub">
+          {item.availability === "available" && `${item.entryCount || 0} 个根目录项目 · `}
+          {item.availability === "unknown" && `核验提示：${item.verifyMessage || "上游暂时不可用"} · `}
           {item.sourceName && `${item.sourceName} · `}
           {item.resourceType && `${item.resourceType} · `}
           {item.fileName && `${item.fileName} · `}

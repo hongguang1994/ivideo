@@ -39,10 +39,13 @@ func (s SourceFunc) Search(ctx context.Context, query string) ([]Result, Meta, e
 }
 
 type EngineOptions struct {
-	Concurrency int
-	Timeout     time.Duration
-	CacheTTL    time.Duration
-	MaxResults  int
+	Concurrency             int
+	Timeout                 time.Duration
+	CacheTTL                time.Duration
+	MaxResults              int
+	VerificationConcurrency int
+	VerificationTimeout     time.Duration
+	VerificationTTL         time.Duration
 }
 
 type cacheEntry struct {
@@ -73,14 +76,22 @@ type searchJob struct {
 
 // Engine 并发调度来源插件，并集中负责缓存、失败隔离、去重和排序。
 type Engine struct {
-	options  EngineOptions
-	sources  []Source
-	mu       sync.RWMutex
-	cache    map[string]cacheEntry
-	health   map[string]SourceHealth
-	jobs     map[string]*searchJob
-	inflight map[string]*searchJob
-	nextJob  atomic.Uint64
+	options     EngineOptions
+	sources     []Source
+	mu          sync.RWMutex
+	cache       map[string]cacheEntry
+	health      map[string]SourceHealth
+	jobs        map[string]*searchJob
+	inflight    map[string]*searchJob
+	nextJob     atomic.Uint64
+	verifier    ResultVerifier
+	verifyMu    sync.RWMutex
+	verifyCache map[string]verificationCacheEntry
+}
+
+type verificationCacheEntry struct {
+	result    Verification
+	expiresAt time.Time
 }
 
 func NewEngine(options EngineOptions, sources ...Source) *Engine {
@@ -96,15 +107,27 @@ func NewEngine(options EngineOptions, sources ...Source) *Engine {
 	if options.MaxResults <= 0 {
 		options.MaxResults = 200
 	}
+	if options.VerificationConcurrency <= 0 {
+		options.VerificationConcurrency = 2
+	}
+	if options.VerificationTimeout <= 0 {
+		options.VerificationTimeout = 12 * time.Second
+	}
+	if options.VerificationTTL <= 0 {
+		options.VerificationTTL = 15 * time.Minute
+	}
 	e := &Engine{
 		options: options, cache: make(map[string]cacheEntry), health: make(map[string]SourceHealth),
-		jobs: make(map[string]*searchJob), inflight: make(map[string]*searchJob),
+		jobs: make(map[string]*searchJob), inflight: make(map[string]*searchJob), verifyCache: make(map[string]verificationCacheEntry),
 	}
 	for _, source := range sources {
 		e.Register(source)
 	}
 	return e
 }
+
+// SetVerifier 注入分享核验能力。未注入时引擎仍可用于纯索引搜索和单元测试。
+func (e *Engine) SetVerifier(verifier ResultVerifier) { e.verifier = verifier }
 
 func (e *Engine) Register(source Source) {
 	if source == nil || strings.TrimSpace(source.Descriptor().ID) == "" {
@@ -283,14 +306,100 @@ func (e *Engine) searchAll(ctx context.Context, query, cacheKey string, onUpdate
 		if onUpdate != nil {
 			partialMeta := meta
 			partialMeta.DurationMS = time.Since(started).Milliseconds()
-			onUpdate(rankAndMerge(all, query, e.options.MaxResults), partialMeta)
+			partial := rankAndMerge(all, query, e.options.MaxResults)
+			if e.verifier != nil {
+				for i := range partial {
+					partial[i].Availability = AvailabilityChecking
+				}
+			}
+			onUpdate(partial, partialMeta)
 		}
 	}
 	sort.Slice(meta.Sources, func(i, j int) bool { return meta.Sources[i].ID < meta.Sources[j].ID })
 	items := rankAndMerge(all, query, e.options.MaxResults)
+	items, meta = e.verifyResults(ctx, items, meta)
 	meta.DurationMS = time.Since(started).Milliseconds()
 	e.storeCache(cacheKey, items, meta)
 	return cloneResults(items), meta, nil
+}
+
+func (e *Engine) verifyResults(ctx context.Context, items []Result, meta Meta) ([]Result, Meta) {
+	if e.verifier == nil || len(items) == 0 {
+		return items, meta
+	}
+	type checked struct {
+		index int
+		value Verification
+	}
+	results := make(chan checked, len(items))
+	semaphore := make(chan struct{}, e.options.VerificationConcurrency)
+	var wg sync.WaitGroup
+	for index, item := range items {
+		wg.Add(1)
+		go func(index int, item Result) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			results <- checked{index: index, value: e.verifyOne(ctx, item)}
+		}(index, item)
+	}
+	go func() { wg.Wait(); close(results) }()
+	verified := make([]Verification, len(items))
+	for result := range results {
+		verified[result.index] = result.value
+	}
+	kept := make([]Result, 0, len(items))
+	for index, item := range items {
+		verification := verified[index]
+		item.Availability = verification.Status
+		item.EntryCount = verification.Count
+		item.VerifyMessage = verification.Message
+		if !verification.At.IsZero() {
+			item.VerifiedAt = verification.At.Unix()
+		}
+		switch verification.Status {
+		case AvailabilityAvailable:
+			meta.Verified++
+			kept = append(kept, item)
+		case AvailabilityEmpty, AvailabilityInvalid:
+			meta.Rejected++
+		default:
+			meta.Unverified++
+			kept = append(kept, item)
+		}
+	}
+	if meta.Rejected > 0 {
+		meta.Warnings = append(meta.Warnings, fmt.Sprintf("已隐藏 %d 条空分享或失效分享", meta.Rejected))
+	}
+	return kept, meta
+}
+
+func (e *Engine) verifyOne(ctx context.Context, item Result) Verification {
+	key := canonicalShareKey(item)
+	now := time.Now()
+	e.verifyMu.RLock()
+	cached, ok := e.verifyCache[key]
+	e.verifyMu.RUnlock()
+	if ok && now.Before(cached.expiresAt) {
+		return cached.result
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, e.options.VerificationTimeout)
+	defer cancel()
+	result := e.verifier.Verify(verifyCtx, item)
+	if result.Status == "" {
+		result.Status = AvailabilityUnknown
+	}
+	if result.At.IsZero() {
+		result.At = now
+	}
+	ttl := e.options.VerificationTTL
+	if result.Status == AvailabilityUnknown && ttl > time.Minute {
+		ttl = time.Minute
+	}
+	e.verifyMu.Lock()
+	e.verifyCache[key] = verificationCacheEntry{result: result, expiresAt: now.Add(ttl)}
+	e.verifyMu.Unlock()
+	return result
 }
 
 func (e *Engine) cleanupJobsLocked(now time.Time) {

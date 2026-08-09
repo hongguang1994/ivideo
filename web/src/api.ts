@@ -313,6 +313,10 @@ export interface SearchResource {
   sourceUrl: string;
   score?: number;
   sources?: string[];
+  availability?: "checking" | "available" | "empty" | "invalid" | "unknown";
+  entryCount?: number;
+  verifiedAt?: number;
+  verifyMessage?: string;
 }
 
 export interface SearchSourceReport {
@@ -334,6 +338,9 @@ export interface SearchMeta {
   cached?: boolean;
   sources?: SearchSourceReport[];
   warnings?: string[];
+  verified?: number;
+  rejected?: number;
+  unverified?: number;
 }
 
 export interface SearchResponse {

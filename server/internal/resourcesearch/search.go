@@ -1,24 +1,52 @@
 // Package resourcesearch 提供可插拔的公开资源搜索来源。
 package resourcesearch
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+const (
+	AvailabilityChecking  = "checking"
+	AvailabilityAvailable = "available"
+	AvailabilityEmpty     = "empty"
+	AvailabilityInvalid   = "invalid"
+	AvailabilityUnknown   = "unknown"
+)
 
 // Result 是从公开索引中识别出的一个网盘分享。
 type Result struct {
-	Provider     string   `json:"provider"`
-	ShareURL     string   `json:"shareUrl"`
-	SharePwd     string   `json:"sharePwd"`
-	Title        string   `json:"title"`
-	ResourceType string   `json:"resourceType,omitempty"`
-	FileName     string   `json:"fileName,omitempty"`
-	UpdatedAt    string   `json:"updatedAt,omitempty"`
-	Source       string   `json:"source"`
-	SourceName   string   `json:"sourceName,omitempty"`
-	Repository   string   `json:"repository"`
-	Path         string   `json:"path"`
-	SourceURL    string   `json:"sourceUrl"`
-	Score        int      `json:"score,omitempty"`
-	Sources      []string `json:"sources,omitempty"`
+	Provider      string   `json:"provider"`
+	ShareURL      string   `json:"shareUrl"`
+	SharePwd      string   `json:"sharePwd"`
+	Title         string   `json:"title"`
+	ResourceType  string   `json:"resourceType,omitempty"`
+	FileName      string   `json:"fileName,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
+	Source        string   `json:"source"`
+	SourceName    string   `json:"sourceName,omitempty"`
+	Repository    string   `json:"repository"`
+	Path          string   `json:"path"`
+	SourceURL     string   `json:"sourceUrl"`
+	Score         int      `json:"score,omitempty"`
+	Sources       []string `json:"sources,omitempty"`
+	Availability  string   `json:"availability,omitempty"`
+	EntryCount    int      `json:"entryCount,omitempty"`
+	VerifiedAt    int64    `json:"verifiedAt,omitempty"`
+	VerifyMessage string   `json:"verifyMessage,omitempty"`
+}
+
+// Verification 是网盘适配器对分享根目录的核验结果。
+type Verification struct {
+	Status  string
+	Count   int
+	Message string
+	At      time.Time
+}
+
+// ResultVerifier 隔离资源发现和具体网盘 API；引擎只关心分享是否真实含有内容。
+type ResultVerifier interface {
+	Verify(ctx context.Context, result Result) Verification
 }
 
 // SourceReport 描述一次查询中单个来源的执行情况。
@@ -55,6 +83,9 @@ type Meta struct {
 	Cached     bool           `json:"cached,omitempty"`
 	Sources    []SourceReport `json:"sources,omitempty"`
 	Warnings   []string       `json:"warnings,omitempty"`
+	Verified   int            `json:"verified,omitempty"`
+	Rejected   int            `json:"rejected,omitempty"`
+	Unverified int            `json:"unverified,omitempty"`
 }
 
 // Provider 是网络资源搜索来源的统一抽象。
