@@ -313,6 +313,9 @@ export interface SearchResource {
   sourceUrl: string;
   score?: number;
   sources?: string[];
+  originalTitle?: string;
+  titleConfidence?: number;
+  matchEvidence?: string[];
   availability?: "checking" | "available" | "empty" | "invalid" | "unknown";
   entryCount?: number;
   verifiedAt?: number;

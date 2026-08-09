@@ -34,17 +34,17 @@ type SourceDescriptor struct {
 // Source 是独立资源发现引擎的插件接口。
 type Source interface {
 	Descriptor() SourceDescriptor
-	Search(ctx context.Context, query string) ([]Result, Meta, error)
+	Search(ctx context.Context, query string) ([]SourceResult, Meta, error)
 }
 
 // SourceFunc 让已有 Provider 或动态凭据来源无需额外类型即可接入引擎。
 type SourceFunc struct {
 	Info       SourceDescriptor
-	SearchFunc func(context.Context, string) ([]Result, Meta, error)
+	SearchFunc func(context.Context, string) ([]SourceResult, Meta, error)
 }
 
 func (s SourceFunc) Descriptor() SourceDescriptor { return s.Info }
-func (s SourceFunc) Search(ctx context.Context, query string) ([]Result, Meta, error) {
+func (s SourceFunc) Search(ctx context.Context, query string) ([]SourceResult, Meta, error) {
 	return s.SearchFunc(ctx, query)
 }
 
@@ -297,7 +297,7 @@ func (e *Engine) searchAll(ctx context.Context, query, cacheKey string, onUpdate
 	started := time.Now()
 	type sourceResult struct {
 		info  SourceDescriptor
-		items []Result
+		items []SourceResult
 		meta  Meta
 		err   error
 		spent time.Duration
@@ -331,16 +331,12 @@ func (e *Engine) searchAll(ctx context.Context, query, cacheKey string, onUpdate
 			report.Error = result.err.Error()
 			meta.Warnings = append(meta.Warnings, result.info.Name+": "+result.err.Error())
 		} else {
-			for i := range result.items {
-				if result.items[i].Source == "" {
-					result.items[i].Source = result.info.ID
+			for _, raw := range result.items {
+				item, ok := normalizeSourceResult(raw, query, result.info)
+				if ok {
+					all = append(all, item)
 				}
-				if result.items[i].SourceName == "" {
-					result.items[i].SourceName = result.info.Name
-				}
-				result.items[i].Score += result.info.Priority
 			}
-			all = append(all, result.items...)
 		}
 		meta.Scanned += result.meta.Scanned
 		if result.meta.Remaining >= 0 && (meta.Remaining < 0 || result.meta.Remaining < meta.Remaining) {
@@ -656,18 +652,22 @@ func mergeRankedResult(a, b Result) Result {
 }
 
 func canonicalShareKey(item Result) string {
-	parsed, err := url.Parse(strings.TrimSpace(item.ShareURL))
+	return canonicalShareValues(item.Provider, item.ShareURL)
+}
+
+func canonicalShareValues(provider, shareURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(shareURL))
 	if err != nil {
 		return ""
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	for i := 0; i+1 < len(parts); i++ {
 		if parts[i] == "s" && parts[i+1] != "" {
-			return item.Provider + ":" + strings.ToLower(parts[i+1])
+			return provider + ":" + strings.ToLower(parts[i+1])
 		}
 	}
 	parsed.RawQuery, parsed.Fragment = "", ""
-	return item.Provider + ":" + strings.ToLower(parsed.String())
+	return provider + ":" + strings.ToLower(parsed.String())
 }
 
 func normalizeSearchText(value string) string {

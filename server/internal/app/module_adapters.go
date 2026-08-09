@@ -97,7 +97,7 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 			ID: "aliyunpanshare", Name: "阿里云盘结构化仓库", Kind: "github-repository", Priority: 90,
 			Description: "结构化解析 acoooder/aliyunpanshare 的 Markdown 资源表。", Timeout: 22 * time.Second,
 		},
-		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.Result, resourcesearch.Meta, error) {
+		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.SourceResult, resourcesearch.Meta, error) {
 			token, err := githubToken()
 			if err != nil {
 				return nil, resourcesearch.Meta{Source: "aliyunpanshare"}, err
@@ -110,7 +110,7 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 			ID: "github-code", Name: "GitHub 公开仓库", Kind: "code-search", Priority: 65,
 			Description: "通过 GitHub Code Search 检索公开仓库中的网盘链接。", Timeout: 20 * time.Second,
 		},
-		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.Result, resourcesearch.Meta, error) {
+		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.SourceResult, resourcesearch.Meta, error) {
 			token, err := githubToken()
 			if err != nil {
 				return nil, resourcesearch.Meta{Source: "github"}, err
@@ -123,10 +123,10 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 			ID: "metadata-alias", Name: "TMDb 别名扩展", Kind: "query-expander", Priority: 75,
 			Description: "使用 TMDb 别名扩展关键词，再交给公开仓库来源检索。", Timeout: 22 * time.Second,
 		},
-		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.Result, resourcesearch.Meta, error) {
+		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.SourceResult, resourcesearch.Meta, error) {
 			expanded := metadataService.PreferredDiscoveryQuery(ctx, query)
 			if strings.EqualFold(strings.TrimSpace(expanded), strings.TrimSpace(query)) {
-				return []resourcesearch.Result{}, resourcesearch.Meta{Source: "metadata-alias"}, nil
+				return []resourcesearch.SourceResult{}, resourcesearch.Meta{Source: "metadata-alias"}, nil
 			}
 			token, err := githubToken()
 			if err != nil {

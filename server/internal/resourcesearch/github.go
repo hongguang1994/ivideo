@@ -50,7 +50,7 @@ type githubSearchResponse struct {
 	Message string `json:"message"`
 }
 
-func (g *GitHubProvider) Search(ctx context.Context, query string) ([]Result, Meta, error) {
+func (g *GitHubProvider) Search(ctx context.Context, query string) ([]SourceResult, Meta, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, Meta{Source: "github"}, fmt.Errorf("搜索关键词不能为空")
@@ -70,7 +70,7 @@ func (g *GitHubProvider) Search(ctx context.Context, query string) ([]Result, Me
 		return nil, Meta{Source: "github", Remaining: remaining, ResetAt: resetAt}, fmt.Errorf("解析 GitHub 搜索结果失败: %w", err)
 	}
 
-	results := make([]Result, 0)
+	results := make([]SourceResult, 0)
 	seen := make(map[string]bool)
 	scanned := 0
 	for _, item := range search.Items {
@@ -92,7 +92,8 @@ func (g *GitHubProvider) Search(ctx context.Context, query string) ([]Result, Me
 				continue
 			}
 			seen[found.ShareURL] = true
-			found.Source = "github"
+			found.TitleBasis = TitleBasisQuery
+			found.Evidence = append(found.Evidence, "github:code-match")
 			found.Repository = item.Repository.FullName
 			found.Path = item.Path
 			found.SourceURL = item.HTMLURL
@@ -148,19 +149,19 @@ func (g *GitHubProvider) request(ctx context.Context, endpoint, accept string) (
 	return response.Body, remaining, resetAt, nil
 }
 
-func extractShareResults(content, title string) []Result {
+func extractShareResults(content, title string) []SourceResult {
 	return extractShareResultsWithContext(content, title, false)
 }
 
 // extractMatchingShareResults 只提取片名附近的链接，避免代码搜索命中一个大型
 // 资源清单后把文件中的其他电影全部误报为当前搜索结果。
-func extractMatchingShareResults(content, title string) []Result {
+func extractMatchingShareResults(content, title string) []SourceResult {
 	return extractShareResultsWithContext(content, title, true)
 }
 
-func extractShareResultsWithContext(content, title string, requireTitleMatch bool) []Result {
+func extractShareResultsWithContext(content, title string, requireTitleMatch bool) []SourceResult {
 	matches := shareURLPattern.FindAllStringIndex(content, -1)
-	results := make([]Result, 0, len(matches))
+	results := make([]SourceResult, 0, len(matches))
 	titleKey := normalizeSearchText(title)
 	for _, match := range matches {
 		rawURL := strings.TrimRight(content[match[0]:match[1]], ".,;，。；")
@@ -177,7 +178,7 @@ func extractShareResultsWithContext(content, title string, requireTitleMatch boo
 		if codeMatch := shareCodePattern.FindStringSubmatch(lineText); len(codeMatch) > 1 {
 			code = codeMatch[1]
 		}
-		results = append(results, Result{
+		results = append(results, SourceResult{
 			Provider: detectProvider(rawURL),
 			ShareURL: rawURL,
 			SharePwd: code,

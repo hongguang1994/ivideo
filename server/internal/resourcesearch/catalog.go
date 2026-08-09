@@ -36,19 +36,19 @@ func (s *CatalogSource) Descriptor() SourceDescriptor {
 	}
 }
 
-func (s *CatalogSource) Search(ctx context.Context, query string) ([]Result, Meta, error) {
+func (s *CatalogSource) Search(ctx context.Context, query string) ([]SourceResult, Meta, error) {
 	queryKey := normalizeSearchText(query)
 	if queryKey == "" {
-		return []Result{}, Meta{Source: "local-catalog"}, fmt.Errorf("搜索关键词不能为空")
+		return []SourceResult{}, Meta{Source: "local-catalog"}, fmt.Errorf("搜索关键词不能为空")
 	}
 	if s == nil || s.load == nil {
-		return []Result{}, Meta{Source: "local-catalog"}, ErrSourceNotConfigured
+		return []SourceResult{}, Meta{Source: "local-catalog"}, ErrSourceNotConfigured
 	}
 	entries, err := s.load(ctx)
 	if err != nil {
-		return []Result{}, Meta{Source: "local-catalog"}, err
+		return []SourceResult{}, Meta{Source: "local-catalog"}, err
 	}
-	items := make([]Result, 0)
+	items := make([]SourceResult, 0)
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return items, Meta{Source: "local-catalog", Scanned: len(entries)}, err
@@ -67,11 +67,12 @@ func (s *CatalogSource) Search(ctx context.Context, query string) ([]Result, Met
 		if title == "" {
 			title = strings.TrimSpace(query)
 		}
-		items = append(items, Result{
+		items = append(items, SourceResult{
 			Provider: entry.Provider, ShareURL: entry.ShareURL, SharePwd: entry.SharePwd,
-			Title: title, ResourceType: entry.ResourceType, FileName: entry.FilePath,
-			Source: "local-catalog", SourceName: "ivideo 本地索引", Repository: "ivideo", Path: entry.FilePath,
-			Score: matchScore,
+			Title: title, TitleBasis: TitleBasisCatalog, ResourceType: entry.ResourceType, FileName: entry.FilePath,
+			SourceName: "ivideo 本地索引", Repository: "ivideo", Path: entry.FilePath,
+			Evidence: []string{"catalog:stored-resource"},
+			Score:    matchScore,
 		})
 	}
 	return items, Meta{Source: "local-catalog", Scanned: len(entries)}, nil

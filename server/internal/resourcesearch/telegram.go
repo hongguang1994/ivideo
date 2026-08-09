@@ -50,12 +50,12 @@ func (s *TelegramSource) Descriptor() SourceDescriptor {
 	}
 }
 
-func (s *TelegramSource) Search(ctx context.Context, query string) ([]Result, Meta, error) {
+func (s *TelegramSource) Search(ctx context.Context, query string) ([]SourceResult, Meta, error) {
 	if len(s.channels) == 0 {
 		return nil, Meta{Source: "telegram-public"}, ErrSourceNotConfigured
 	}
 	type channelResult struct {
-		items []Result
+		items []SourceResult
 		err   error
 	}
 	results := make(chan channelResult, len(s.channels))
@@ -73,7 +73,7 @@ func (s *TelegramSource) Search(ctx context.Context, query string) ([]Result, Me
 	}
 	go func() { wg.Wait(); close(results) }()
 
-	items := make([]Result, 0)
+	items := make([]SourceResult, 0)
 	failed := 0
 	var lastErr error
 	for result := range results {
@@ -90,7 +90,7 @@ func (s *TelegramSource) Search(ctx context.Context, query string) ([]Result, Me
 	return items, Meta{Source: "telegram-public", Scanned: len(s.channels)}, nil
 }
 
-func (s *TelegramSource) searchChannel(ctx context.Context, channel, query string) ([]Result, error) {
+func (s *TelegramSource) searchChannel(ctx context.Context, channel, query string) ([]SourceResult, error) {
 	endpoint := "https://t.me/s/" + url.PathEscape(channel) + "?q=" + url.QueryEscape(query)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -108,13 +108,13 @@ func (s *TelegramSource) searchChannel(ctx context.Context, channel, query strin
 	return parseTelegramHTML(io.LimitReader(response.Body, 4<<20), channel, query)
 }
 
-func parseTelegramHTML(reader io.Reader, channel, query string) ([]Result, error) {
+func parseTelegramHTML(reader io.Reader, channel, query string) ([]SourceResult, error) {
 	document, err := html.Parse(reader)
 	if err != nil {
 		return nil, fmt.Errorf("解析 Telegram 页面失败: %w", err)
 	}
 	queryKey := normalizeSearchText(query)
-	items := make([]Result, 0)
+	items := make([]SourceResult, 0)
 	seen := make(map[string]struct{})
 	var walk func(*html.Node)
 	walk = func(node *html.Node) {
@@ -135,16 +135,17 @@ func parseTelegramHTML(reader io.Reader, channel, query string) ([]Result, error
 						item.SharePwd = parsed.Query().Get("password")
 					}
 				}
-				key := canonicalShareKey(item)
+				key := canonicalShareValues(item.Provider, item.ShareURL)
 				if _, ok := seen[key]; ok {
 					continue
 				}
 				seen[key] = struct{}{}
-				item.Source = "telegram-public"
+				item.TitleBasis = TitleBasisMessage
 				item.SourceName = "@" + channel
 				item.Repository = "Telegram"
 				item.Path = post
 				item.UpdatedAt = updatedAt
+				item.Evidence = append(item.Evidence, "telegram:message-text")
 				if post != "" {
 					item.SourceURL = "https://t.me/" + post
 				} else {

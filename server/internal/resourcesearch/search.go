@@ -12,28 +12,45 @@ const (
 	AvailabilityEmpty     = "empty"
 	AvailabilityInvalid   = "invalid"
 	AvailabilityUnknown   = "unknown"
+
+	TitleBasisStructured = "structured-title"
+	TitleBasisCatalog    = "catalog-title"
+	TitleBasisMessage    = "message-title"
+	TitleBasisSource     = "source-title"
+	TitleBasisQuery      = "query-fallback"
 )
 
-// Result 是从公开索引中识别出的一个网盘分享。
+// SourceResult 是来源适配器提交给引擎的原始候选。适配器只描述它实际
+// 观察到的数据，不负责决定最终来源标识、置信度、去重或可用性。
+type SourceResult struct {
+	Provider     string   `json:"provider"`
+	ShareURL     string   `json:"shareUrl"`
+	SharePwd     string   `json:"sharePwd"`
+	Title        string   `json:"title"`
+	TitleBasis   string   `json:"-"`
+	ResourceType string   `json:"resourceType,omitempty"`
+	FileName     string   `json:"fileName,omitempty"`
+	UpdatedAt    string   `json:"updatedAt,omitempty"`
+	SourceName   string   `json:"sourceName,omitempty"`
+	Repository   string   `json:"repository"`
+	Path         string   `json:"path"`
+	SourceURL    string   `json:"sourceUrl"`
+	Score        int      `json:"score,omitempty"`
+	Evidence     []string `json:"-"`
+}
+
+// Result 是经过核心引擎标准化后对 API 输出的网盘分享。
 type Result struct {
-	Provider      string   `json:"provider"`
-	ShareURL      string   `json:"shareUrl"`
-	SharePwd      string   `json:"sharePwd"`
-	Title         string   `json:"title"`
-	ResourceType  string   `json:"resourceType,omitempty"`
-	FileName      string   `json:"fileName,omitempty"`
-	UpdatedAt     string   `json:"updatedAt,omitempty"`
-	Source        string   `json:"source"`
-	SourceName    string   `json:"sourceName,omitempty"`
-	Repository    string   `json:"repository"`
-	Path          string   `json:"path"`
-	SourceURL     string   `json:"sourceUrl"`
-	Score         int      `json:"score,omitempty"`
-	Sources       []string `json:"sources,omitempty"`
-	Availability  string   `json:"availability,omitempty"`
-	EntryCount    int      `json:"entryCount,omitempty"`
-	VerifiedAt    int64    `json:"verifiedAt,omitempty"`
-	VerifyMessage string   `json:"verifyMessage,omitempty"`
+	SourceResult
+	Source          string   `json:"source"`
+	Sources         []string `json:"sources,omitempty"`
+	OriginalTitle   string   `json:"originalTitle,omitempty"`
+	TitleConfidence int      `json:"titleConfidence,omitempty"`
+	MatchEvidence   []string `json:"matchEvidence,omitempty"`
+	Availability    string   `json:"availability,omitempty"`
+	EntryCount      int      `json:"entryCount,omitempty"`
+	VerifiedAt      int64    `json:"verifiedAt,omitempty"`
+	VerifyMessage   string   `json:"verifyMessage,omitempty"`
 }
 
 // Verification 是网盘适配器对分享根目录的核验结果。
@@ -94,5 +111,5 @@ type Meta struct {
 
 // Provider 是网络资源搜索来源的统一抽象。
 type Provider interface {
-	Search(ctx context.Context, query string) ([]Result, Meta, error)
+	Search(ctx context.Context, query string) ([]SourceResult, Meta, error)
 }

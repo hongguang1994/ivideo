@@ -14,14 +14,14 @@ func TestEngineMergesDuplicateSharesAndKeepsRichMetadata(t *testing.T) {
 	engine := NewEngine(EngineOptions{CacheTTL: time.Minute, MaxResults: 20},
 		SourceFunc{
 			Info: SourceDescriptor{ID: "structured", Name: "结构化来源", Priority: 90},
-			SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
-				return []Result{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/ABC123?from=x", Title: "流浪地球", ResourceType: "电影", FileName: "流浪地球.2160p.mkv"}}, Meta{Scanned: 1}, nil
+			SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
+				return []SourceResult{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/ABC123?from=x", Title: "流浪地球", ResourceType: "电影", FileName: "流浪地球.2160p.mkv"}}, Meta{Scanned: 1}, nil
 			},
 		},
 		SourceFunc{
 			Info: SourceDescriptor{ID: "generic", Name: "通用来源", Priority: 50},
-			SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
-				return []Result{{Provider: "aliyun", ShareURL: "https://www.aliyundrive.com/s/abc123", Title: "流浪地球", SharePwd: "a1b2"}}, Meta{Scanned: 2}, nil
+			SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
+				return []SourceResult{{Provider: "aliyun", ShareURL: "https://www.aliyundrive.com/s/abc123", Title: "流浪地球", SharePwd: "a1b2"}}, Meta{Scanned: 2}, nil
 			},
 		},
 	)
@@ -45,9 +45,9 @@ func TestEngineCachesQueries(t *testing.T) {
 	var calls atomic.Int32
 	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
 		Info: SourceDescriptor{ID: "counted", Name: "计数来源"},
-		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+		SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 			calls.Add(1)
-			return []Result{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/token", Title: "测试"}}, Meta{}, nil
+			return []SourceResult{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/token", Title: "测试"}}, Meta{}, nil
 		},
 	})
 	_, first, _ := engine.Search(context.Background(), "测试", false)
@@ -65,9 +65,9 @@ func TestEngineCanDisableAndReenableSourcePlugins(t *testing.T) {
 	var calls atomic.Int32
 	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
 		Info: SourceDescriptor{ID: "optional", Name: "可选来源", Kind: "test", Timeout: 2 * time.Second},
-		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+		SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 			calls.Add(1)
-			return []Result{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/optional", Title: "测试"}}, Meta{}, nil
+			return []SourceResult{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/optional", Title: "测试"}}, Meta{}, nil
 		},
 	})
 	if err := engine.SetSourceEnabled("optional", false); err != nil {
@@ -92,7 +92,7 @@ func TestEngineCanDisableAndReenableSourcePlugins(t *testing.T) {
 func TestEngineSerializesEmptyResultsAsArray(t *testing.T) {
 	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
 		Info: SourceDescriptor{ID: "empty", Name: "空来源"},
-		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+		SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 			return nil, Meta{}, nil
 		},
 	})
@@ -114,14 +114,14 @@ func TestEngineKeepsPartialResultsWhenSourceFails(t *testing.T) {
 	engine := NewEngine(EngineOptions{},
 		SourceFunc{
 			Info: SourceDescriptor{ID: "failed", Name: "失败来源"},
-			SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+			SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 				return nil, Meta{}, errors.New("temporary failure")
 			},
 		},
 		SourceFunc{
 			Info: SourceDescriptor{ID: "working", Name: "正常来源"},
-			SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
-				return []Result{{Provider: "115", ShareURL: "https://115.com/s/shareid", Title: "测试"}}, Meta{}, nil
+			SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
+				return []SourceResult{{Provider: "115", ShareURL: "https://115.com/s/shareid", Title: "测试"}}, Meta{}, nil
 			},
 		},
 	)
@@ -142,8 +142,8 @@ func (f verifierFunc) Verify(ctx context.Context, result Result) Verification { 
 func TestEngineFiltersEmptyAndInvalidSharesAfterVerification(t *testing.T) {
 	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
 		Info: SourceDescriptor{ID: "source", Name: "测试来源"},
-		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
-			return []Result{
+		SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
+			return []SourceResult{
 				{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/available", Title: "测试"},
 				{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/empty", Title: "测试"},
 				{Provider: "quark", ShareURL: "https://pan.quark.cn/s/unknown", Title: "测试"},
@@ -179,8 +179,8 @@ func TestEngineCachesShareVerificationAcrossQueries(t *testing.T) {
 	var checks atomic.Int32
 	engine := NewEngine(EngineOptions{CacheTTL: time.Millisecond, VerificationTTL: time.Minute}, SourceFunc{
 		Info: SourceDescriptor{ID: "source", Name: "测试来源"},
-		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
-			return []Result{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/same", Title: "测试"}}, Meta{}, nil
+		SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
+			return []SourceResult{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/same", Title: "测试"}}, Meta{}, nil
 		},
 	})
 	engine.SetVerifier(verifierFunc(func(context.Context, Result) Verification {
@@ -198,16 +198,16 @@ func TestProgressiveSearchReturnsFastThenPublishesCompletion(t *testing.T) {
 	engine := NewEngine(EngineOptions{Timeout: time.Second, CacheTTL: time.Minute},
 		SourceFunc{
 			Info: SourceDescriptor{ID: "fast", Name: "快速来源", Priority: 20},
-			SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+			SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 				time.Sleep(5 * time.Millisecond)
-				return []Result{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/fast", Title: "测试"}}, Meta{}, nil
+				return []SourceResult{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/fast", Title: "测试"}}, Meta{}, nil
 			},
 		},
 		SourceFunc{
 			Info: SourceDescriptor{ID: "slow", Name: "慢速来源", Priority: 10},
-			SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+			SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 				time.Sleep(80 * time.Millisecond)
-				return []Result{{Provider: "115", ShareURL: "https://115.com/s/slow", Title: "测试"}}, Meta{}, nil
+				return []SourceResult{{Provider: "115", ShareURL: "https://115.com/s/slow", Title: "测试"}}, Meta{}, nil
 			},
 		},
 	)
@@ -254,10 +254,10 @@ func TestProgressiveSearchSharesInflightJob(t *testing.T) {
 	var calls atomic.Int32
 	engine := NewEngine(EngineOptions{Timeout: time.Second}, SourceFunc{
 		Info: SourceDescriptor{ID: "slow", Name: "慢速来源"},
-		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+		SearchFunc: func(context.Context, string) ([]SourceResult, Meta, error) {
 			calls.Add(1)
 			time.Sleep(70 * time.Millisecond)
-			return []Result{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/shared", Title: "测试"}}, Meta{}, nil
+			return []SourceResult{{Provider: "aliyun", ShareURL: "https://www.alipan.com/s/shared", Title: "测试"}}, Meta{}, nil
 		},
 	})
 	first, _ := engine.SearchProgressive(context.Background(), "测试", false, 5*time.Millisecond)

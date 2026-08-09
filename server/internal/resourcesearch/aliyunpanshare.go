@@ -47,7 +47,7 @@ func NewAliyunPanShare(token string) *AliyunPanShareProvider {
 	return &AliyunPanShareProvider{github: NewGitHub(token)}
 }
 
-func (p *AliyunPanShareProvider) Search(ctx context.Context, query string) ([]Result, Meta, error) {
+func (p *AliyunPanShareProvider) Search(ctx context.Context, query string) ([]SourceResult, Meta, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, Meta{Source: "aliyunpanshare"}, fmt.Errorf("搜索关键词不能为空")
@@ -85,7 +85,7 @@ func (p *AliyunPanShareProvider) Search(ctx context.Context, query string) ([]Re
 }
 
 // List 返回资源源当前合集中的全部表格资源，不需要关键词。
-func (p *AliyunPanShareProvider) List(ctx context.Context) ([]Result, Meta, error) {
+func (p *AliyunPanShareProvider) List(ctx context.Context) ([]SourceResult, Meta, error) {
 	if p.github.token == "" {
 		return nil, Meta{Source: "aliyunpanshare"}, fmt.Errorf("未配置 GitHub Token")
 	}
@@ -105,7 +105,7 @@ func (p *AliyunPanShareProvider) List(ctx context.Context) ([]Result, Meta, erro
 		}
 	}
 	sort.Strings(paths)
-	results := make([]Result, 0)
+	results := make([]SourceResult, 0)
 	scanned := 0
 	for _, filePath := range paths {
 		content, fetchErr := p.github.fetchRepositoryFile(ctx, filePath)
@@ -136,8 +136,8 @@ func prioritizeCurrentFiles(paths []string) []string {
 	return ordered
 }
 
-func (p *AliyunPanShareProvider) scanMarkdownFiles(ctx context.Context, paths []string, query string) ([]Result, int) {
-	results := make([]Result, 0)
+func (p *AliyunPanShareProvider) scanMarkdownFiles(ctx context.Context, paths []string, query string) ([]SourceResult, int) {
+	results := make([]SourceResult, 0)
 	seen := make(map[string]int)
 	scanned := 0
 	for _, path := range paths {
@@ -198,10 +198,10 @@ func (g *GitHubProvider) fetchRepositoryFile(ctx context.Context, filePath strin
 
 var markdownLinkPattern = regexp.MustCompile(`https?://(?:www\.)?(?:alipan\.com|aliyundrive\.com|115\.com|pan\.quark\.cn)/s/[A-Za-z0-9_-]+(?:\?[^\s<>"'，。；;）)]*)?`)
 
-func parseAliyunPanShareMarkdown(content, query, filePath string) []Result {
+func parseAliyunPanShareMarkdown(content, query, filePath string) []SourceResult {
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	results := make([]Result, 0)
+	results := make([]SourceResult, 0)
 	var headers map[string]int
 	for _, line := range lines {
 		cells := splitMarkdownRow(line)
@@ -230,10 +230,10 @@ func parseAliyunPanShareMarkdown(content, query, filePath string) []Result {
 		}
 		for _, rawURL := range links {
 			rawURL = strings.TrimRight(rawURL, ".,;，。；")
-			results = append(results, Result{
+			results = append(results, SourceResult{
 				Provider: detectProvider(rawURL), ShareURL: rawURL, SharePwd: sharePwd, Title: title,
-				ResourceType: resourceType, FileName: fileName, UpdatedAt: updatedAt,
-				Source: "aliyunpanshare", SourceName: aliyunPanShareSourceName,
+				TitleBasis: TitleBasisStructured, ResourceType: resourceType, FileName: fileName, UpdatedAt: updatedAt,
+				SourceName: aliyunPanShareSourceName, Evidence: []string{"github:structured-row"},
 				Repository: aliyunPanShareRepo, Path: filePath,
 				SourceURL: "https://github.com/" + aliyunPanShareRepo + "/blob/main/" + url.PathEscape(filePath),
 			})
@@ -306,7 +306,7 @@ func markdownResourceFields(cells []string, headers map[string]int) (resourceTyp
 	return cell("type"), cell("title"), cell("file"), cell("updated"), cell("pwd")
 }
 
-func mergeResourceResult(existing, incoming Result) Result {
+func mergeResourceResult(existing, incoming SourceResult) SourceResult {
 	if existing.Title == "" {
 		existing.Title = incoming.Title
 	}
