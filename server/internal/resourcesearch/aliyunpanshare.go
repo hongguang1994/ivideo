@@ -199,6 +199,13 @@ func (g *GitHubProvider) fetchRepositoryFile(ctx context.Context, filePath strin
 var markdownLinkPattern = regexp.MustCompile(`https?://(?:www\.)?(?:alipan\.com|aliyundrive\.com|115\.com|pan\.quark\.cn)/s/[A-Za-z0-9_-]+(?:\?[^\s<>"'，。；;）)]*)?`)
 
 func parseAliyunPanShareMarkdown(content, query, filePath string) []SourceResult {
+	return ParseMarkdownShareList(content, query, filePath, aliyunPanShareRepo, "main", aliyunPanShareSourceName)
+}
+
+// ParseMarkdownShareList parses a structured Markdown share list. The parser is
+// intentionally repository-neutral so the collection module can reuse it for
+// every approved GitHub source without copying provider-specific rules.
+func ParseMarkdownShareList(content, query, filePath, repository, branch, sourceName string) []SourceResult {
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 	results := make([]SourceResult, 0)
@@ -233,9 +240,9 @@ func parseAliyunPanShareMarkdown(content, query, filePath string) []SourceResult
 			results = append(results, SourceResult{
 				Provider: detectProvider(rawURL), ShareURL: rawURL, SharePwd: sharePwd, Title: title,
 				TitleBasis: TitleBasisStructured, ResourceType: resourceType, FileName: fileName, UpdatedAt: updatedAt,
-				SourceName: aliyunPanShareSourceName, Evidence: []string{"github:structured-row"},
-				Repository: aliyunPanShareRepo, Path: filePath,
-				SourceURL: "https://github.com/" + aliyunPanShareRepo + "/blob/main/" + url.PathEscape(filePath),
+				SourceName: sourceName, Evidence: []string{"github:structured-row"},
+				Repository: repository, Path: filePath,
+				SourceURL: "https://github.com/" + repository + "/blob/" + branch + "/" + url.PathEscape(filePath),
 			})
 		}
 	}

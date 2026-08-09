@@ -32,6 +32,7 @@ export default function GitHubResources() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<BatchShareResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     getGitHubSources().then((data) => setSources(data.items || [])).catch((e) => setError(String((e as Error).message || e)));
@@ -47,7 +48,7 @@ export default function GitHubResources() {
       })
       .catch((e) => setError(String((e as Error).message || e)))
       .finally(() => setLoading(false));
-  }, [page]);
+  }, [page, reloadKey]);
 
   const visibleItems = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -90,6 +91,8 @@ export default function GitHubResources() {
     try {
       const synced = await syncGitHubResources();
       setResult({ added: synced.added, duplicates: synced.existing, failed: 0, results: [] });
+      setReloadKey((value) => value + 1);
+      getGitHubSources().then((data) => setSources(data.items || [])).catch(() => undefined);
     } catch (e) {
       setError(String((e as Error).message || e));
     } finally {
@@ -102,15 +105,15 @@ export default function GitHubResources() {
       <div className="page-head">
         <div>
           <h1>GitHub 资源</h1>
-          <p>自动读取已接入 GitHub 资源源中的全部网盘分享资源。</p>
+          <p>后台增量采集已接入仓库的资源清单，页面只读取本地索引，不下载网盘视频。</p>
         </div>
         <button className="primary" onClick={syncAll} disabled={syncing || loading}>
-          <RefreshCw size={17} /> {syncing ? "同步中…" : "同步全部入库"}
+          <RefreshCw size={17} /> {syncing ? "采集中…" : "立即增量采集"}
         </button>
       </div>
 
       {error && <div className="settings-notice notice-error">{error}</div>}
-      {result && <div className="settings-notice notice-success">同步完成：新增 {result.added} 条，已存在 {result.duplicates} 条，失败 {result.failed} 条。</div>}
+      {result && <div className="settings-notice notice-success">采集完成：新增 {result.added} 条，已知 {result.duplicates} 条，失败 {result.failed} 条。</div>}
 
       <section className="github-source-list" aria-label="GitHub 资源源列表">
         {sources.map((source) => (
@@ -135,7 +138,7 @@ export default function GitHubResources() {
           <button className="primary" onClick={collect} disabled={saving || selected.size === 0}>{saving ? "收藏中…" : "收藏所选"}</button>
         </div>
 
-        {loading && <div className="panel muted">正在解析 GitHub 资源…</div>}
+        {loading && <div className="panel muted">正在读取本地资源索引…</div>}
         {!loading && visibleItems.length === 0 && <div className="panel muted">暂时没有解析到资源。</div>}
         {!loading && visibleItems.length > 0 && <div className="github-resource-table">
           {visibleItems.map((item) => {

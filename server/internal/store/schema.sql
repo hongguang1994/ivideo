@@ -21,6 +21,50 @@ CREATE TABLE IF NOT EXISTS share_sources (
 CREATE INDEX IF NOT EXISTS idx_sources_bookmarked_created ON share_sources (is_bookmarked, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sources_provider_share_id ON share_sources (provider, share_id);
 
+-- GitHub 采集源：仓库、文件 SHA 与解析出的分享链接分层保存。
+-- 只保存文本清单和结构化结果，绝不下载网盘视频文件。
+CREATE TABLE IF NOT EXISTS github_repositories (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    repository        TEXT    NOT NULL UNIQUE,
+    branch            TEXT    NOT NULL DEFAULT 'main',
+    parser            TEXT    NOT NULL DEFAULT 'markdown-table',
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    last_commit_sha   TEXT    NOT NULL DEFAULT '',
+    last_collected_at INTEGER NOT NULL DEFAULT 0,
+    last_error        TEXT    NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS github_repository_files (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    repository_id     INTEGER NOT NULL,
+    path              TEXT    NOT NULL,
+    blob_sha          TEXT    NOT NULL,
+    size              INTEGER NOT NULL DEFAULT 0,
+    active            INTEGER NOT NULL DEFAULT 1,
+    last_collected_at INTEGER NOT NULL DEFAULT 0,
+    last_error        TEXT    NOT NULL DEFAULT '',
+    UNIQUE (repository_id, path),
+    FOREIGN KEY (repository_id) REFERENCES github_repositories (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_github_files_repository_active ON github_repository_files (repository_id, active);
+
+CREATE TABLE IF NOT EXISTS github_share_observations (
+    repository_file_id INTEGER NOT NULL,
+    source_id          INTEGER NOT NULL,
+    title              TEXT    NOT NULL DEFAULT '',
+    resource_type      TEXT    NOT NULL DEFAULT '',
+    file_name          TEXT    NOT NULL DEFAULT '',
+    updated_at_text    TEXT    NOT NULL DEFAULT '',
+    active             INTEGER NOT NULL DEFAULT 1,
+    observed_at        INTEGER NOT NULL,
+    PRIMARY KEY (repository_file_id, source_id),
+    FOREIGN KEY (repository_file_id) REFERENCES github_repository_files (id) ON DELETE CASCADE,
+    FOREIGN KEY (source_id) REFERENCES share_sources (id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_github_observations_source_active ON github_share_observations (source_id, active);
+
 -- 资源目录：分享来源中的具体文件。
 CREATE TABLE IF NOT EXISTS resources (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

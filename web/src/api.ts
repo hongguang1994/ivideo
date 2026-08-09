@@ -390,6 +390,8 @@ export interface GitHubResourceSource {
   parser: string;
   description: string;
   configured: boolean;
+  lastCollectedAt?: number;
+  lastError?: string;
 }
 
 export function getGitHubSources(): Promise<{ items: GitHubResourceSource[] }> {

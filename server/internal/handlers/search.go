@@ -10,7 +10,6 @@ import (
 
 	"ivideo/server/internal/resourcesearch"
 	"ivideo/server/internal/resp"
-	"ivideo/server/internal/store"
 )
 
 // SearchResources 从配置的公开来源搜索网盘分享。GET /api/v1/search/resources
@@ -32,89 +31,37 @@ func (h *Handler) SearchResources(c *gin.Context) {
 	resp.OK(c, snapshot)
 }
 
-// SyncGitHubResources 将已接入资源源解析出的分享去重后写入分享库。
+// SyncGitHubResources triggers one incremental collection. The collector reads
+// only changed repository list files and persists its result before replying.
 // POST /api/v1/search/github/resources/sync
 func (h *Handler) SyncGitHubResources(c *gin.Context) {
-	credential, found, err := h.store.GetCredential("github")
-	if err != nil {
-		resp.Fail(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found || credential.Token == "" {
-		resp.Fail(c, http.StatusBadRequest, "请先在设置中配置 GitHub Token")
-		return
-	}
-	items, _, err := resourcesearch.NewAliyunPanShare(credential.Token).List(c.Request.Context())
+	status, err := h.runGitHubCollection(c.Request.Context())
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	shares := make([]store.Share, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		key := batchShareKey(item.Provider, item.ShareURL)
-		if item.ShareURL == "" || item.Provider == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		shares = append(shares, store.Share{
-			Provider: item.Provider, ShareURL: item.ShareURL, SharePwd: item.SharePwd,
-			ShareID: extractShareID(item.ShareURL), Title: item.Title,
-			Category: item.ResourceType, Status: "unknown",
-		})
-	}
-	added, existing, err := h.store.SyncShares(shares)
-	if err != nil {
-		resp.Fail(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	resp.OK(c, gin.H{"discovered": len(shares), "added": added, "existing": existing})
+	resp.OK(c, gin.H{"discovered": status.SharesAdded + status.SharesKnown, "added": status.SharesAdded, "existing": status.SharesKnown, "status": status})
 }
 
 // ListGitHubSources 返回当前接入的 GitHub 资源源列表。
 func (h *Handler) ListGitHubSources(c *gin.Context) {
-	credential, found, err := h.store.GetCredential("github")
+	repositories, err := h.store.ListGitHubRepositories()
 	if err != nil {
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	configured := found && credential.Token != ""
-	resp.OK(c, gin.H{"items": []gin.H{
-		{
-			"id":          "acoooder/aliyunpanshare",
-			"name":        "阿里云盘分享库",
-			"repository":  "acoooder/aliyunpanshare",
-			"url":         "https://github.com/acoooder/aliyunpanshare",
-			"parser":      "Markdown 资源表格",
-			"description": "解析资源名称、类型、文件名、分享链接和更新时间。",
-			"configured":  configured,
-		},
-		{
-			"id":          "github-code-search",
-			"name":        "GitHub 全网公开搜索",
-			"repository":  "所有公开仓库",
-			"url":         "https://github.com/search",
-			"parser":      "分享链接识别",
-			"description": "搜索所有能被 GitHub Code Search 找到的公开仓库内容。",
-			"configured":  configured,
-		},
-	}})
+	items := make([]gin.H, 0, len(repositories))
+	for _, repository := range repositories {
+		items = append(items, gin.H{"id": repository.ID, "name": repository.Repository, "repository": repository.Repository,
+			"url": "https://github.com/" + repository.Repository, "parser": repository.Parser,
+			"description": "后台增量采集，只有发生变化的资源清单文件才会读取。", "configured": repository.Enabled,
+			"lastCollectedAt": repository.LastCollectedAt, "lastError": repository.LastError})
+	}
+	resp.OK(c, gin.H{"items": items, "status": h.getGitHubCollectionStatus()})
 }
 
 // ListGitHubResources 返回 GitHub 资源源解析出的全部资源，支持服务端分页。
 func (h *Handler) ListGitHubResources(c *gin.Context) {
-	credential, found, err := h.store.GetCredential("github")
-	if err != nil {
-		resp.Fail(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found || credential.Token == "" {
-		resp.Fail(c, http.StatusBadRequest, "请先在设置中配置 GitHub Token")
-		return
-	}
 	page := 1
 	pageSize := 50
 	if value := c.Query("page"); value != "" {
@@ -129,21 +76,18 @@ func (h *Handler) ListGitHubResources(c *gin.Context) {
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 50
 	}
-	items, meta, err := resourcesearch.NewAliyunPanShare(credential.Token).List(c.Request.Context())
+	items, total, err := h.store.ListGitHubObservedShares(page, pageSize)
 	if err != nil {
-		resp.Fail(c, http.StatusBadGateway, err.Error())
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	total := len(items)
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
+	responseItems := make([]gin.H, 0, len(items))
+	for _, item := range items {
+		responseItems = append(responseItems, gin.H{"provider": item.Provider, "shareUrl": item.ShareURL, "sharePwd": item.SharePwd,
+			"title": item.Title, "resourceType": item.ResourceType, "fileName": item.FileName, "updatedAt": item.UpdatedAt,
+			"source": "github-collection", "sourceName": item.Repository, "repository": item.Repository, "path": item.Path, "sourceUrl": item.SourceURL})
 	}
-	end := start + pageSize
-	if end > total {
-		end = total
-	}
-	resp.OK(c, gin.H{"items": items[start:end], "total": total, "page": page, "pageSize": pageSize, "meta": meta})
+	resp.OK(c, gin.H{"items": responseItems, "total": total, "page": page, "pageSize": pageSize, "meta": gin.H{"source": "github-collection"}})
 }
 
 // SearchSettings 返回公开搜索来源的配置状态。GET /api/v1/settings/search

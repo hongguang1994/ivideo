@@ -75,3 +75,15 @@ type ShareRepository interface {
 	UpdateShare(s Share) error
 	DeleteShare(id int64) error
 }
+
+// GitHubCollectorRepository owns the local index maintained from approved
+// public GitHub repositories. It deliberately keeps collection provenance
+// separate from user bookmarks and imported media.
+type GitHubCollectorRepository interface {
+	EnsureGitHubRepository(repository, branch, parser string) (GitHubRepository, error)
+	ListGitHubRepositories() ([]GitHubRepository, error)
+	GetGitHubRepositoryFiles(repositoryID int64) ([]GitHubRepositoryFile, error)
+	ApplyGitHubRepositorySnapshot(snapshot GitHubRepositorySnapshot) (GitHubCollectionResult, error)
+	ListGitHubObservedShares(page, pageSize int) ([]GitHubObservedShare, int, error)
+	ListGitHubCatalogShares() ([]GitHubObservedShare, error)
+}

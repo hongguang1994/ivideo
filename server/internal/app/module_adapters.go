@@ -51,7 +51,7 @@ func buildMediaModules(cfg config.Config, st store.Store, cm *cache.Manager, jf 
 	return importService, metadataService, workflow
 }
 
-func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metadataService *metadata.Service) (*resourcesearch.Engine, *resourcesearch.RSSSource) {
+func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, _ *metadata.Service) (*resourcesearch.Engine, *resourcesearch.RSSSource) {
 	// 每个来源是独立插件；引擎统一处理并发、超时、缓存、去重和健康状态。
 	engine := resourcesearch.NewEngine(resourcesearch.EngineOptions{
 		Concurrency: cfg.DiscoveryConcurrency,
@@ -81,61 +81,18 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 				Title: resource.Title, FilePath: resource.FilePath,
 			})
 		}
+		githubShares, err := st.ListGitHubCatalogShares()
+		if err != nil {
+			return nil, err
+		}
+		for _, share := range githubShares {
+			entries = append(entries, resourcesearch.CatalogEntry{
+				Provider: share.Provider, ShareURL: share.ShareURL, SharePwd: share.SharePwd,
+				Title: share.Title, ResourceType: share.ResourceType, FilePath: share.FileName,
+			})
+		}
 		return entries, ctx.Err()
 	}))
-	githubToken := func() (string, error) {
-		credential, found, err := st.GetCredential("github")
-		if err != nil {
-			return "", err
-		}
-		if !found || strings.TrimSpace(credential.Token) == "" {
-			return "", resourcesearch.ErrSourceNotConfigured
-		}
-		return credential.Token, nil
-	}
-	engine.Register(resourcesearch.SourceFunc{
-		Info: resourcesearch.SourceDescriptor{
-			ID: "aliyunpanshare", Name: "阿里云盘结构化仓库", Kind: "github-repository", Priority: 90,
-			Description: "结构化解析 acoooder/aliyunpanshare 的 Markdown 资源表。", Timeout: 22 * time.Second,
-		},
-		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.SourceResult, resourcesearch.Meta, error) {
-			token, err := githubToken()
-			if err != nil {
-				return nil, resourcesearch.Meta{Source: "aliyunpanshare"}, err
-			}
-			return resourcesearch.NewAliyunPanShare(token).Search(ctx, query)
-		},
-	})
-	engine.Register(resourcesearch.SourceFunc{
-		Info: resourcesearch.SourceDescriptor{
-			ID: "github-code", Name: "GitHub 公开仓库", Kind: "code-search", Priority: 65,
-			Description: "通过 GitHub Code Search 检索公开仓库中的网盘链接。", Timeout: 20 * time.Second,
-		},
-		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.SourceResult, resourcesearch.Meta, error) {
-			token, err := githubToken()
-			if err != nil {
-				return nil, resourcesearch.Meta{Source: "github"}, err
-			}
-			return resourcesearch.NewGitHub(token).Search(ctx, query)
-		},
-	})
-	engine.Register(resourcesearch.SourceFunc{
-		Info: resourcesearch.SourceDescriptor{
-			ID: "metadata-alias", Name: "TMDb 别名扩展", Kind: "query-expander", Priority: 75,
-			Description: "使用 TMDb 别名扩展关键词，再交给公开仓库来源检索。", Timeout: 22 * time.Second,
-		},
-		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.SourceResult, resourcesearch.Meta, error) {
-			expanded := metadataService.PreferredDiscoveryQuery(ctx, query)
-			if strings.EqualFold(strings.TrimSpace(expanded), strings.TrimSpace(query)) {
-				return []resourcesearch.SourceResult{}, resourcesearch.Meta{Source: "metadata-alias"}, nil
-			}
-			token, err := githubToken()
-			if err != nil {
-				return nil, resourcesearch.Meta{Source: "metadata-alias"}, err
-			}
-			return resourcesearch.NewGitHub(token).Search(ctx, expanded)
-		},
-	})
 	engine.Register(resourcesearch.NewTelegramSource(cfg.DiscoveryTelegramChannels))
 	rssSource := resourcesearch.NewRSSSource(func(context.Context) ([]resourcesearch.RSSFeed, error) {
 		return loadRSSFeeds(st)

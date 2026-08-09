@@ -9,6 +9,7 @@ import (
 	"ivideo/server/internal/cache"
 	"ivideo/server/internal/cache/backends"
 	"ivideo/server/internal/config"
+	"ivideo/server/internal/githubcollector"
 	"ivideo/server/internal/handlers"
 	"ivideo/server/internal/jellyfin"
 	"ivideo/server/internal/openlist"
@@ -54,7 +55,18 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 
 	importService, metadataService, workflowService := buildMediaModules(cfg, st, cm, jf)
 	discovery, rssSource := buildDiscovery(cfg, st, cm, metadataService)
-	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery, rssSource)
+	githubToken := func() (string, error) {
+		credential, found, err := st.GetCredential("github")
+		if err != nil || !found || credential.Token == "" {
+			return "", err
+		}
+		return credential.Token, nil
+	}
+	githubCollection := githubcollector.New(st, githubToken)
+	if err := githubCollection.EnsureDefaultRepository(); err != nil {
+		return nil, err
+	}
+	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery, rssSource, githubCollection)
 
 	// 先确保媒体库存在，再生成 strm。生成器只在实际写入/删除时通知
 	// Jellyfin 扫库，避免启动时的“生成 + 显式扫描”重复执行。
@@ -71,6 +83,7 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	h.StartShareChecks(cfg.ShareCheckInterval)
 	h.StartImportScheduler()
 	h.StartRSSScheduler()
+	h.StartGitHubCollector()
 	if jf != nil {
 		if removed, err := jf.RemoveMissingItems(cfg.MediaDir); err != nil {
 			slog.Warn("清理 Jellyfin 旧索引失败", "err", err)

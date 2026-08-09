@@ -14,6 +14,7 @@ import (
 
 	"ivideo/server/internal/cache"
 	"ivideo/server/internal/config"
+	"ivideo/server/internal/githubcollector"
 	"ivideo/server/internal/importer"
 	"ivideo/server/internal/jellyfin"
 	"ivideo/server/internal/mediaproxy"
@@ -26,24 +27,28 @@ import (
 
 // Handler 聚合请求处理所需的依赖。
 type Handler struct {
-	cfg            config.Config
-	ol             *openlist.Client
-	jf             *jellyfin.Client // 可能为 nil（未配置 Jellyfin 时）
-	store          Repository
-	cache          *cache.Manager
-	importer       *importer.Service
-	metadata       *metadata.Service
-	workflow       *mediaworkflow.Service
-	discovery      *resourcesearch.Engine
-	rssSource      *resourcesearch.RSSSource
-	shareCheckMu   sync.Mutex
-	importRunMu    sync.Mutex
-	rssRunMu       sync.Mutex
-	importStatusMu sync.RWMutex
-	importStatus   importTaskStatus
-	rssStatusMu    sync.RWMutex
-	rssStatus      rssCollectionStatus
-	importCursor   int
+	cfg             config.Config
+	ol              *openlist.Client
+	jf              *jellyfin.Client // 可能为 nil（未配置 Jellyfin 时）
+	store           Repository
+	cache           *cache.Manager
+	importer        *importer.Service
+	metadata        *metadata.Service
+	workflow        *mediaworkflow.Service
+	discovery       *resourcesearch.Engine
+	rssSource       *resourcesearch.RSSSource
+	githubCollector *githubcollector.Collector
+	shareCheckMu    sync.Mutex
+	importRunMu     sync.Mutex
+	rssRunMu        sync.Mutex
+	githubRunMu     sync.Mutex
+	importStatusMu  sync.RWMutex
+	importStatus    importTaskStatus
+	rssStatusMu     sync.RWMutex
+	rssStatus       rssCollectionStatus
+	githubStatusMu  sync.RWMutex
+	githubStatus    githubCollectionStatus
+	importCursor    int
 }
 
 // Repository is the API layer's aggregate. Business modules receive narrower
@@ -51,6 +56,7 @@ type Handler struct {
 type Repository interface {
 	store.ResourceRepository
 	store.ShareRepository
+	store.GitHubCollectorRepository
 	store.CredentialRepository
 	store.SettingsRepository
 	store.MediaRepository
@@ -63,11 +69,11 @@ func logShareCheck(message string, args ...any) { slog.Info(message, args...) }
 func New(
 	cfg config.Config, ol *openlist.Client, jf *jellyfin.Client, st Repository, cm *cache.Manager,
 	importService *importer.Service, metadataService *metadata.Service, workflowService *mediaworkflow.Service,
-	discovery *resourcesearch.Engine, rssSource *resourcesearch.RSSSource,
+	discovery *resourcesearch.Engine, rssSource *resourcesearch.RSSSource, githubCollector *githubcollector.Collector,
 ) *Handler {
 	return &Handler{
 		cfg: cfg, ol: ol, jf: jf, store: st, cache: cm,
-		importer: importService, metadata: metadataService, workflow: workflowService, discovery: discovery, rssSource: rssSource,
+		importer: importService, metadata: metadataService, workflow: workflowService, discovery: discovery, rssSource: rssSource, githubCollector: githubCollector,
 	}
 }
 

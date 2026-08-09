@@ -31,6 +31,50 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at    BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- GitHub 采集源：仅记录仓库索引、文本文件 SHA 与分享链接来源，不存视频文件。
+CREATE TABLE IF NOT EXISTS github_repositories (
+    id                BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    repository        VARCHAR(255) NOT NULL,
+    branch            VARCHAR(128) NOT NULL DEFAULT 'main',
+    parser            VARCHAR(32) NOT NULL DEFAULT 'markdown-table',
+    enabled           TINYINT(1) NOT NULL DEFAULT 1,
+    last_commit_sha   CHAR(64) NOT NULL DEFAULT '',
+    last_collected_at BIGINT NOT NULL DEFAULT 0,
+    last_error        VARCHAR(1024) NOT NULL DEFAULT '',
+    created_at        BIGINT NOT NULL,
+    updated_at        BIGINT NOT NULL,
+    UNIQUE KEY uniq_github_repository (repository)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS github_repository_files (
+    id                BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    repository_id     BIGINT NOT NULL,
+    path              VARCHAR(1024) NOT NULL,
+    blob_sha          CHAR(64) NOT NULL,
+    size              BIGINT NOT NULL DEFAULT 0,
+    active            TINYINT(1) NOT NULL DEFAULT 1,
+    last_collected_at BIGINT NOT NULL DEFAULT 0,
+    last_error        VARCHAR(1024) NOT NULL DEFAULT '',
+    UNIQUE KEY uniq_github_repository_file (repository_id, path),
+    INDEX idx_github_files_repository_active (repository_id, active),
+    CONSTRAINT fk_github_files_repository FOREIGN KEY (repository_id) REFERENCES github_repositories (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS github_share_observations (
+    repository_file_id BIGINT NOT NULL,
+    source_id          BIGINT NOT NULL,
+    title              VARCHAR(512) NOT NULL DEFAULT '',
+    resource_type      VARCHAR(255) NOT NULL DEFAULT '',
+    file_name          VARCHAR(1024) NOT NULL DEFAULT '',
+    updated_at_text    VARCHAR(255) NOT NULL DEFAULT '',
+    active             TINYINT(1) NOT NULL DEFAULT 1,
+    observed_at        BIGINT NOT NULL,
+    PRIMARY KEY (repository_file_id, source_id),
+    INDEX idx_github_observations_source_active (source_id, active),
+    CONSTRAINT fk_github_observations_file FOREIGN KEY (repository_file_id) REFERENCES github_repository_files (id) ON DELETE CASCADE,
+    CONSTRAINT fk_github_observations_source FOREIGN KEY (source_id) REFERENCES share_sources (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 资源目录:分享来源中的具体文件。
 CREATE TABLE IF NOT EXISTS resources (
     id         BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,

@@ -37,6 +37,7 @@ type Store interface {
 	MediaRepository
 	JobRepository
 	ShareRepository
+	GitHubCollectorRepository
 	Close() error
 }
 
@@ -55,6 +56,7 @@ var _ SettingsRepository = (*sqlStore)(nil)
 var _ MediaRepository = (*sqlStore)(nil)
 var _ JobRepository = (*sqlStore)(nil)
 var _ ShareRepository = (*sqlStore)(nil)
+var _ GitHubCollectorRepository = (*sqlStore)(nil)
 
 // Resource 是一条收集来的分享资源。
 type Resource struct {
