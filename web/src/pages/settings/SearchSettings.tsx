@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Activity, Code2, ExternalLink, Trash2 } from "lucide-react";
-import { deleteGitHubToken, getSearchSettings, saveGitHubToken, type SearchSettingsStatus } from "../../api";
+import { deleteGitHubToken, getSearchSettings, saveGitHubToken, updateSearchSource, type SearchSettingsStatus } from "../../api";
 
 export default function SearchSettings() {
   const [status, setStatus] = useState<SearchSettingsStatus | null>(null);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
+  const [busySource, setBusySource] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -34,6 +35,16 @@ export default function SearchSettings() {
     } finally { setBusy(false); }
   };
 
+  const toggleSource = async (id: string, enabled: boolean) => {
+    setBusySource(id); setError(""); setMessage("");
+    try {
+      setStatus(await updateSearchSource(id, enabled));
+      setMessage(enabled ? "搜索来源已启用" : "搜索来源已停用");
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally { setBusySource(""); }
+  };
+
   return (
     <div className="settings-page">
       <div className="page-head"><h1>资源发现引擎</h1><p>管理独立搜索引擎的来源、健康状态和连接凭据。</p></div>
@@ -48,8 +59,9 @@ export default function SearchSettings() {
           {status?.engine?.sources.map((source) => (
             <div className="search-source-health" key={source.id}>
               <Activity size={18} />
-              <div><strong>{source.name}</strong><span>{source.lastCheckedAt ? `最近耗时 ${source.lastDurationMs} ms` : "等待首次查询"}</span></div>
-              <span className={`badge ${!source.lastCheckedAt || source.lastHealthy ? "badge-ok" : "badge-off"}`}>{!source.lastCheckedAt ? "待检测" : source.lastHealthy ? "正常" : "异常"}</span>
+              <div><strong>{source.name}</strong><span>{source.description || source.kind || "独立搜索来源"}</span><span>{source.lastCheckedAt ? `最近耗时 ${source.lastDurationMs} ms · 超时 ${source.timeoutMs} ms` : `等待首次查询 · 超时 ${source.timeoutMs} ms`}</span></div>
+              <span className={`badge ${source.enabled && (!source.lastCheckedAt || source.lastHealthy) ? "badge-ok" : "badge-off"}`}>{!source.enabled ? "已停用" : !source.lastCheckedAt ? "待检测" : source.lastHealthy ? "正常" : "异常"}</span>
+              <label className="source-toggle"><input type="checkbox" checked={source.enabled} disabled={busySource === source.id} onChange={(event) => toggleSource(source.id, event.target.checked)} /><span>启用</span></label>
               {source.lastError && <span className="sub">{source.lastError}</span>}
             </div>
           ))}

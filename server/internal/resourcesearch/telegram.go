@@ -44,7 +44,10 @@ func NewTelegramSource(channels []string) *TelegramSource {
 }
 
 func (s *TelegramSource) Descriptor() SourceDescriptor {
-	return SourceDescriptor{ID: "telegram-public", Name: "Telegram 公开频道", Priority: 55}
+	return SourceDescriptor{
+		ID: "telegram-public", Name: "Telegram 公开频道", Kind: "public-channel", Priority: 55,
+		Description: "从已配置的 Telegram 公开频道消息中提取网盘分享。", Timeout: 18 * time.Second,
+	}
 }
 
 func (s *TelegramSource) Search(ctx context.Context, query string) ([]Result, Meta, error) {

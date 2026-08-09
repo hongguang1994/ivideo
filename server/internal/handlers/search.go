@@ -148,18 +148,65 @@ func (h *Handler) ListGitHubResources(c *gin.Context) {
 
 // SearchSettings 返回公开搜索来源的配置状态。GET /api/v1/settings/search
 func (h *Handler) SearchSettings(c *gin.Context) {
-	credential, found, err := h.store.GetCredential("github")
+	payload, err := h.searchSettingsPayload()
 	if err != nil {
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	resp.OK(c, gin.H{
+	resp.OK(c, payload)
+}
+
+func (h *Handler) searchSettingsPayload() (gin.H, error) {
+	credential, found, err := h.store.GetCredential("github")
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{
 		"githubConfigured": found && credential.Token != "", "updatedAt": credential.UpdatedAt,
 		"engine": gin.H{
 			"name": "ivideo 资源发现引擎", "sources": h.discovery.Status(),
 			"cacheMinutes": h.cfg.DiscoveryCacheMinutes, "maxResults": h.cfg.DiscoveryMaxResults,
 		},
-	})
+	}, nil
+}
+
+// UpdateSearchSource persists and applies one source plugin switch.
+func (h *Handler) UpdateSearchSource(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		resp.Fail(c, http.StatusBadRequest, "enabled 必须是布尔值")
+		return
+	}
+	previous := false
+	found := false
+	for _, source := range h.discovery.Status() {
+		if source.ID == id {
+			previous, found = source.Enabled, true
+			break
+		}
+	}
+	if !found {
+		resp.Fail(c, http.StatusNotFound, "资源来源不存在")
+		return
+	}
+	if err := h.discovery.SetSourceEnabled(id, *req.Enabled); err != nil {
+		resp.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.SetSetting(resourcesearch.SourceEnabledSettingKey(id), fmt.Sprintf("%t", *req.Enabled)); err != nil {
+		_ = h.discovery.SetSourceEnabled(id, previous)
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	payload, err := h.searchSettingsPayload()
+	if err != nil {
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.OK(c, payload)
 }
 
 // SaveGitHubToken 校验并保存 GitHub 只读访问令牌。POST /api/v1/settings/search/github
@@ -180,7 +227,12 @@ func (h *Handler) SaveGitHubToken(c *gin.Context) {
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	resp.OK(c, gin.H{"githubConfigured": true})
+	payload, err := h.searchSettingsPayload()
+	if err != nil {
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.OK(c, payload)
 }
 
 // DeleteGitHubToken 清除 GitHub 搜索令牌。DELETE /api/v1/settings/search/github
@@ -189,5 +241,10 @@ func (h *Handler) DeleteGitHubToken(c *gin.Context) {
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	resp.OK(c, gin.H{"githubConfigured": false})
+	payload, err := h.searchSettingsPayload()
+	if err != nil {
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.OK(c, payload)
 }

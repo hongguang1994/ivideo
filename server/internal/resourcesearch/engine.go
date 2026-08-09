@@ -14,11 +14,21 @@ import (
 
 var ErrSourceNotConfigured = errors.New("来源未配置")
 
+const sourceEnabledSettingPrefix = "discovery.source.enabled."
+
+func SourceEnabledSettingKey(id string) string {
+	return sourceEnabledSettingPrefix + strings.TrimSpace(id)
+}
+
 // SourceDescriptor 是资源来源插件的稳定身份和排序权重。
 type SourceDescriptor struct {
-	ID       string
-	Name     string
-	Priority int
+	ID                string
+	Name              string
+	Kind              string
+	Description       string
+	Priority          int
+	Timeout           time.Duration
+	DisabledByDefault bool
 }
 
 // Source 是独立资源发现引擎的插件接口。
@@ -78,6 +88,7 @@ type searchJob struct {
 type Engine struct {
 	options     EngineOptions
 	sources     []Source
+	enabled     map[string]bool
 	mu          sync.RWMutex
 	cache       map[string]cacheEntry
 	health      map[string]SourceHealth
@@ -118,7 +129,8 @@ func NewEngine(options EngineOptions, sources ...Source) *Engine {
 	}
 	e := &Engine{
 		options: options, cache: make(map[string]cacheEntry), health: make(map[string]SourceHealth),
-		jobs: make(map[string]*searchJob), inflight: make(map[string]*searchJob), verifyCache: make(map[string]verificationCacheEntry),
+		enabled: make(map[string]bool),
+		jobs:    make(map[string]*searchJob), inflight: make(map[string]*searchJob), verifyCache: make(map[string]verificationCacheEntry),
 	}
 	for _, source := range sources {
 		e.Register(source)
@@ -137,7 +149,36 @@ func (e *Engine) Register(source Source) {
 	defer e.mu.Unlock()
 	e.sources = append(e.sources, source)
 	info := source.Descriptor()
-	e.health[info.ID] = SourceHealth{ID: info.ID, Name: info.Name, Priority: info.Priority}
+	enabled := !info.DisabledByDefault
+	e.enabled[info.ID] = enabled
+	e.health[info.ID] = SourceHealth{
+		ID: info.ID, Name: info.Name, Kind: info.Kind, Description: info.Description,
+		Priority: info.Priority, Enabled: enabled, TimeoutMS: sourceTimeout(info, e.options.Timeout).Milliseconds(),
+	}
+}
+
+// SetSourceEnabled updates one plugin without rebuilding the engine. Running
+// searches keep their snapshot; subsequent searches use the new registry state.
+func (e *Engine) SetSourceEnabled(id string, enabled bool) error {
+	id = strings.TrimSpace(id)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	health, ok := e.health[id]
+	if !ok {
+		return fmt.Errorf("未知资源来源 %q", id)
+	}
+	e.enabled[id] = enabled
+	health.Enabled = enabled
+	e.health[id] = health
+	e.cache = make(map[string]cacheEntry)
+	return nil
+}
+
+func sourceTimeout(info SourceDescriptor, fallback time.Duration) time.Duration {
+	if info.Timeout > 0 {
+		return info.Timeout
+	}
+	return fallback
 }
 
 func (e *Engine) Search(ctx context.Context, query string, refresh bool) ([]Result, Meta, error) {
@@ -242,10 +283,15 @@ func (e *Engine) getOrStartJob(query, key string, refresh bool) *searchJob {
 
 func (e *Engine) searchAll(ctx context.Context, query, cacheKey string, onUpdate func([]Result, Meta)) ([]Result, Meta, error) {
 	e.mu.RLock()
-	sources := append([]Source(nil), e.sources...)
+	sources := make([]Source, 0, len(e.sources))
+	for _, source := range e.sources {
+		if e.enabled[source.Descriptor().ID] {
+			sources = append(sources, source)
+		}
+	}
 	e.mu.RUnlock()
 	if len(sources) == 0 {
-		return nil, Meta{Source: "ivideo-discovery"}, errors.New("资源发现引擎没有可用来源")
+		return nil, Meta{Source: "ivideo-discovery"}, errors.New("资源发现引擎没有已启用的来源")
 	}
 
 	started := time.Now()
@@ -265,7 +311,7 @@ func (e *Engine) searchAll(ctx context.Context, query, cacheKey string, onUpdate
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			sourceCtx, cancel := context.WithTimeout(ctx, e.options.Timeout)
+			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout(source.Descriptor(), e.options.Timeout))
 			defer cancel()
 			begin := time.Now()
 			items, meta, err := source.Search(sourceCtx, query)
@@ -497,7 +543,9 @@ func (e *Engine) recordHealth(info SourceDescriptor, err error, spent time.Durat
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	health := e.health[info.ID]
-	health.ID, health.Name, health.Priority = info.ID, info.Name, info.Priority
+	health.ID, health.Name, health.Kind, health.Description, health.Priority = info.ID, info.Name, info.Kind, info.Description, info.Priority
+	health.Enabled = e.enabled[info.ID]
+	health.TimeoutMS = sourceTimeout(info, e.options.Timeout).Milliseconds()
 	health.LastCheckedAt = time.Now().Unix()
 	health.LastDuration = spent.Milliseconds()
 	health.LastHealthy = err == nil

@@ -64,7 +64,11 @@ type SourceReport struct {
 type SourceHealth struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
+	Kind          string `json:"kind,omitempty"`
+	Description   string `json:"description,omitempty"`
 	Priority      int    `json:"priority"`
+	Enabled       bool   `json:"enabled"`
+	TimeoutMS     int64  `json:"timeoutMs"`
 	LastHealthy   bool   `json:"lastHealthy"`
 	LastError     string `json:"lastError,omitempty"`
 	LastDuration  int64  `json:"lastDurationMs"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // CatalogEntry 是 ivideo 已收藏分享与已导入资源的统一搜索投影。
@@ -29,7 +30,10 @@ type CatalogSource struct {
 func NewCatalogSource(load CatalogLoader) *CatalogSource { return &CatalogSource{load: load} }
 
 func (s *CatalogSource) Descriptor() SourceDescriptor {
-	return SourceDescriptor{ID: "local-catalog", Name: "ivideo 本地索引", Priority: 120}
+	return SourceDescriptor{
+		ID: "local-catalog", Name: "ivideo 本地索引", Kind: "internal", Priority: 120,
+		Description: "检索已收藏分享和已导入资源，不访问外部网站。", Timeout: 5 * time.Second,
+	}
 }
 
 func (s *CatalogSource) Search(ctx context.Context, query string) ([]Result, Meta, error) {

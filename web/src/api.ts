@@ -391,7 +391,11 @@ export interface SearchSettingsStatus {
     sources: Array<{
       id: string;
       name: string;
+      kind?: string;
+      description?: string;
       priority: number;
+      enabled: boolean;
+      timeoutMs: number;
       lastHealthy: boolean;
       lastError?: string;
       lastDurationMs: number;
@@ -404,6 +408,14 @@ export interface SearchSettingsStatus {
 
 export function getSearchSettings(): Promise<SearchSettingsStatus> {
   return apiFetch<SearchSettingsStatus>("/settings/search");
+}
+
+export function updateSearchSource(id: string, enabled: boolean): Promise<SearchSettingsStatus> {
+  return apiFetch<SearchSettingsStatus>(`/settings/search/sources/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 export function saveGitHubToken(token: string): Promise<SearchSettingsStatus> {

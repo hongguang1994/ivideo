@@ -73,7 +73,7 @@ flowchart LR
 
 ### 新增资源发现来源
 
-实现 `resourcesearch.Source`，在 `buildDiscovery` 注册。引擎会统一提供并发、超时、缓存、结果合并和健康状态。
+实现 `resourcesearch.Source`，在 `buildDiscovery` 注册。每个来源声明稳定 ID、类型、说明、优先级和独立超时；引擎统一提供并发、缓存、结果合并、健康状态以及运行时启停。启停状态保存在 `app_settings`，重启后仍然生效。来源插件只返回标准结果，不直接收藏、导入或生成 STRM。
 
 ### 新增网盘
 

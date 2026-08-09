@@ -17,6 +17,7 @@ func registerSettings(api *gin.RouterGroup, h *handlers.Handler) {
 	api.GET("/settings/metadata", h.MetadataStatus)
 	api.POST("/settings/metadata/token", h.SaveMetadataToken)
 	api.GET("/settings/search", h.SearchSettings)
+	api.PUT("/settings/search/sources/:id", h.UpdateSearchSource)
 	api.POST("/settings/search/github", h.SaveGitHubToken)
 	api.DELETE("/settings/search/github", h.DeleteGitHubToken)
 	api.GET("/settings/import", h.ImportSettings)

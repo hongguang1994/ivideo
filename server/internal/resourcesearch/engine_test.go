@@ -61,6 +61,34 @@ func TestEngineCachesQueries(t *testing.T) {
 	}
 }
 
+func TestEngineCanDisableAndReenableSourcePlugins(t *testing.T) {
+	var calls atomic.Int32
+	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
+		Info: SourceDescriptor{ID: "optional", Name: "可选来源", Kind: "test", Timeout: 2 * time.Second},
+		SearchFunc: func(context.Context, string) ([]Result, Meta, error) {
+			calls.Add(1)
+			return []Result{{Provider: "quark", ShareURL: "https://pan.quark.cn/s/optional", Title: "测试"}}, Meta{}, nil
+		},
+	})
+	if err := engine.SetSourceEnabled("optional", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := engine.Search(context.Background(), "测试", false); err == nil {
+		t.Fatal("all-disabled registry should reject search")
+	}
+	status := engine.Status()
+	if len(status) != 1 || status[0].Enabled || status[0].Kind != "test" || status[0].TimeoutMS != 2000 {
+		t.Fatalf("unexpected disabled status: %+v", status)
+	}
+	if err := engine.SetSourceEnabled("optional", true); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := engine.Search(context.Background(), "测试", false)
+	if err != nil || len(items) != 1 || calls.Load() != 1 {
+		t.Fatalf("source was not re-enabled: items=%+v calls=%d err=%v", items, calls.Load(), err)
+	}
+}
+
 func TestEngineSerializesEmptyResultsAsArray(t *testing.T) {
 	engine := NewEngine(EngineOptions{CacheTTL: time.Minute}, SourceFunc{
 		Info: SourceDescriptor{ID: "empty", Name: "空来源"},

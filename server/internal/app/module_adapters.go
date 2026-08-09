@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,7 +93,10 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 		return credential.Token, nil
 	}
 	engine.Register(resourcesearch.SourceFunc{
-		Info: resourcesearch.SourceDescriptor{ID: "aliyunpanshare", Name: "阿里云盘结构化仓库", Priority: 90},
+		Info: resourcesearch.SourceDescriptor{
+			ID: "aliyunpanshare", Name: "阿里云盘结构化仓库", Kind: "github-repository", Priority: 90,
+			Description: "结构化解析 acoooder/aliyunpanshare 的 Markdown 资源表。", Timeout: 22 * time.Second,
+		},
 		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.Result, resourcesearch.Meta, error) {
 			token, err := githubToken()
 			if err != nil {
@@ -102,7 +106,10 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 		},
 	})
 	engine.Register(resourcesearch.SourceFunc{
-		Info: resourcesearch.SourceDescriptor{ID: "github-code", Name: "GitHub 公开仓库", Priority: 65},
+		Info: resourcesearch.SourceDescriptor{
+			ID: "github-code", Name: "GitHub 公开仓库", Kind: "code-search", Priority: 65,
+			Description: "通过 GitHub Code Search 检索公开仓库中的网盘链接。", Timeout: 20 * time.Second,
+		},
 		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.Result, resourcesearch.Meta, error) {
 			token, err := githubToken()
 			if err != nil {
@@ -112,7 +119,10 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 		},
 	})
 	engine.Register(resourcesearch.SourceFunc{
-		Info: resourcesearch.SourceDescriptor{ID: "metadata-alias", Name: "TMDb 别名扩展", Priority: 75},
+		Info: resourcesearch.SourceDescriptor{
+			ID: "metadata-alias", Name: "TMDb 别名扩展", Kind: "query-expander", Priority: 75,
+			Description: "使用 TMDb 别名扩展关键词，再交给公开仓库来源检索。", Timeout: 22 * time.Second,
+		},
 		SearchFunc: func(ctx context.Context, query string) ([]resourcesearch.Result, resourcesearch.Meta, error) {
 			expanded := metadataService.PreferredDiscoveryQuery(ctx, query)
 			if strings.EqualFold(strings.TrimSpace(expanded), strings.TrimSpace(query)) {
@@ -126,6 +136,16 @@ func buildDiscovery(cfg config.Config, st store.Store, cm *cache.Manager, metada
 		},
 	})
 	engine.Register(resourcesearch.NewTelegramSource(cfg.DiscoveryTelegramChannels))
+	for _, source := range engine.Status() {
+		raw, found, err := st.GetSetting(resourcesearch.SourceEnabledSettingKey(source.ID))
+		if err != nil || !found {
+			continue
+		}
+		enabled, parseErr := strconv.ParseBool(raw)
+		if parseErr == nil {
+			_ = engine.SetSourceEnabled(source.ID, enabled)
+		}
+	}
 	engine.SetVerifier(discoveryVerifier{manager: cm})
 	return engine
 }

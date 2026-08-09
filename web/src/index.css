@@ -460,9 +460,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .discover-result-main .sub { overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
 .search-source-body { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 18px; }
 .search-source-health-list { display: flex; flex-direction: column; }
-.search-source-health { display: grid; grid-template-columns: 28px minmax(180px, 1fr) auto minmax(0, 1.4fr); align-items: center; gap: 12px; padding: 14px 18px; border-top: 1px solid var(--line); }
+.search-source-health { display: grid; grid-template-columns: 28px minmax(240px, 1fr) auto auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 18px; border-top: 1px solid var(--line); }
 .search-source-health > div { display: flex; flex-direction: column; gap: 3px; }
 .search-source-health > div span, .search-source-health > .sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.source-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; white-space: nowrap; }
+.source-toggle input { width: 17px; height: 17px; accent-color: var(--accent); }
 .search-source-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; background: #f0f0f0; color: #24292f; }
 .search-source-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .search-source-copy strong { font-size: 14px; }
@@ -511,6 +513,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .browse-size { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
 
 @media (max-width: 820px) {
+	.search-source-health { grid-template-columns: 28px minmax(0, 1fr) auto auto; }
+	.search-source-health > .sub { grid-column: 2 / -1; }
   .app-shell, .app-shell.sidebar-closed { display: block; --sidebar-width: 224px; padding-top: 58px; }
   .topbar { position: fixed; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; width: 100%; height: 58px; padding: 0 10px; }
   .topbar-search { grid-template-columns: minmax(0, 1fr) 42px; }
@@ -561,6 +565,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 }
 
 @media (max-width: 520px) {
+	.search-source-health { grid-template-columns: 24px minmax(0, 1fr) auto; padding-inline: 12px; }
+	.search-source-health .source-toggle { grid-column: 2; }
+	.search-source-health > .sub { grid-column: 2 / -1; }
   .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
   .topbar-leading { gap: 3px; }
   .brand { display: none; }
