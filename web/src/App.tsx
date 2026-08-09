@@ -11,7 +11,6 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import AccessGate from "./components/AccessGate";
 
 // 页面按路由加载，首页无需下载设置中心和媒体整理等大型模块。
 const Browse = lazy(() => import("./pages/Browse"));
@@ -57,7 +56,6 @@ export default function App() {
   };
 
   return (
-    <AccessGate>
     <div className={`app-shell ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}${isSettings ? " settings-mode" : ""}`}>
       <header className="topbar">
         <div className="topbar-leading">
@@ -134,6 +132,5 @@ export default function App() {
         </div>
       </main>
     </div>
-    </AccessGate>
   );
 }

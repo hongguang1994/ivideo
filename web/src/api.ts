@@ -2,33 +2,11 @@
 // 开发时经 Vite 代理，生产经 nginx 反代。
 
 const BASE = "/api/v1";
-const ACCESS_KEY_STORAGE = "ivideo.access-key";
-const ACCESS_KEY_HEADER = "X-Ivideo-Access-Key";
-
-export function getAccessKey(): string { return localStorage.getItem(ACCESS_KEY_STORAGE) || ""; }
-export function setAccessKey(value: string) { localStorage.setItem(ACCESS_KEY_STORAGE, value); }
-export function clearAccessKey() { localStorage.removeItem(ACCESS_KEY_STORAGE); }
-
-function accessHeaders(headers?: HeadersInit): Headers {
-  const result = new Headers(headers);
-  const key = getAccessKey();
-  if (key) result.set(ACCESS_KEY_HEADER, key);
-  return result;
-}
-
-export async function verifyAccessKey(key: string): Promise<void> {
-  const response = await fetch(`${BASE}/health`, { headers: key ? { [ACCESS_KEY_HEADER]: key } : undefined });
-  if (!response.ok) throw new Error("访问密钥无效");
-}
-
-export function webSocketAccessQuery(): string {
-  const key = getAccessKey();
-  return key ? `access_key=${encodeURIComponent(key)}` : "";
-}
+export function webSocketAccessQuery(): string { return ""; }
 
 // apiFetch 统一发请求并拆包：成功返回 data，失败抛出 msg。
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, { ...init, headers: accessHeaders(init?.headers) });
+  const res = await fetch(BASE + path, init);
   let body: { code?: number; msg?: string; data?: unknown } = {};
   try {
     body = await res.json();

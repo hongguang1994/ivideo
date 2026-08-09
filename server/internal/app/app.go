@@ -97,7 +97,7 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 
 	// 用 gin.New()（而非 gin.Default()），中间件栈由 router 显式装配，避免重复。
 	r := gin.New()
-	router.Register(r, h, cfg)
+	router.Register(r, h)
 	return r, nil
 }
 

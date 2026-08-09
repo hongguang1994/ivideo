@@ -34,7 +34,7 @@ mkdir -p data/server
 cp server/configs/conf.example.yaml data/server/conf.yaml
 ```
 
-1. 修改 `.env` 中的 MySQL 密码、`DB_DSN` 和随机生成的 `SERVER_API_KEY`。
+1. 修改 `.env` 中的 MySQL 密码和 `DB_DSN`。
 2. 修改 `data/server/conf.yaml` 中的 `site_url`。它必须是 Jellyfin 容器能够访问的 ivideo 地址，例如 `http://192.168.50.140:8090`。
 3. 启动服务：
 
