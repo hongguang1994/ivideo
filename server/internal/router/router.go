@@ -14,7 +14,10 @@ func Register(r *gin.Engine, h *handlers.Handler, cfg config.Config) {
 	// 全局中间件栈：Recovery 兜底 panic（返回 500 不崩），Logger 记录访问日志。
 	r.Use(gin.Recovery(), middleware.Logger())
 
-	api := r.Group(handlers.APIPrefix, middleware.AccessKey(cfg.APIKey))
+	api := r.Group(handlers.APIPrefix,
+		middleware.AccessKey(cfg.APIKey),
+		middleware.BodyLimit(middleware.DefaultMaxRequestBodyBytes),
+	)
 
 	api.GET("/health", h.Health)
 	api.GET("/logs/ws", h.StreamLogs)
