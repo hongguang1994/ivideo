@@ -26,6 +26,24 @@ func TestShareSourceKeyNormalizesURL(t *testing.T) {
 	}
 }
 
+func TestFreshSchemaUsesOnlyCanonicalShareTables(t *testing.T) {
+	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	db := st.(*sqlStore).db
+	for _, table := range []string{"share_sources", "github_share_observations"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("obsolete table %s exists in a fresh schema", table)
+		}
+	}
+}
+
 func TestAddShareAlsoCreatesCanonicalShareAndObservation(t *testing.T) {
 	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
 	if err != nil {

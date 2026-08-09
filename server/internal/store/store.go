@@ -328,15 +328,7 @@ func Open(driver, dsn string) (Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := backfillCanonicalShareCatalog(db, d); err != nil {
-		db.Close()
-		return nil, err
-	}
 	if err := upgradeCacheSchema(db, d); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err := cleanupLegacySchema(db, d); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -391,15 +383,15 @@ func (s *sqlStore) AddResource(r Resource) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	sourceID, err := ensureShareSource(tx, Share{Provider: r.Provider, ShareURL: r.ShareURL, SharePwd: r.SharePwd}, false, now)
+	shareID, _, err := s.ensureShare(tx, Share{Provider: r.Provider, ShareURL: r.ShareURL, SharePwd: r.SharePwd}, false, now)
 	if err != nil {
 		return 0, err
 	}
-	r.ResourceKey = resourceKey(sourceID, r.FilePath)
+	r.ResourceKey = resourceKey(shareID, r.FilePath)
 	res, err := tx.Exec(
-		`INSERT INTO resources (source_id, title, poster, overview, file_path, resource_key, created_at, updated_at)
+		`INSERT INTO resources (share_id, title, poster, overview, file_path, resource_key, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sourceID, r.Title, r.Poster, r.Overview, r.FilePath, r.ResourceKey, now, now,
+		shareID, r.Title, r.Poster, r.Overview, r.FilePath, r.ResourceKey, now, now,
 	)
 	if err != nil {
 		if isDuplicateKey(err) {
@@ -413,10 +405,10 @@ func (s *sqlStore) AddResource(r Resource) (int64, error) {
 	return res.LastInsertId()
 }
 
-const resourceCols = `r.id, r.source_id, r.title, COALESCE(r.poster,''), COALESCE(r.overview,''),
-	COALESCE(s.title,''), COALESCE(s.category,''), s.provider, s.share_url, COALESCE(s.share_pwd,''), COALESCE(r.file_path,''), r.created_at, r.updated_at`
+const resourceCols = `r.id, r.share_id, r.title, COALESCE(r.poster,''), COALESCE(r.overview,''),
+	s.title, s.category, s.provider, s.share_url, s.share_pwd, COALESCE(r.file_path,''), r.created_at, r.updated_at`
 
-const resourceJoin = ` FROM resources r JOIN share_sources s ON s.id = r.source_id`
+const resourceJoin = ` FROM resources r JOIN shares s ON s.id = r.share_id`
 
 func scanResource(sc rowScanner) (Resource, error) {
 	var r Resource

@@ -1,29 +1,6 @@
 -- MySQL 建表 DDL(与 schema.sql 的 SQLite 版一一对应)。
 -- 差异:AUTO_INCREMENT、VARCHAR 主键、索引写进建表、utf8mb4、TEXT/VARCHAR 默认值。
 
--- 网盘来源:一个分享链接只保存一次;收藏只是一个标记,资源可继续引用它。
-CREATE TABLE IF NOT EXISTS share_sources (
-    id              BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    provider        VARCHAR(32)   NOT NULL,
-    share_url       VARCHAR(1024) NOT NULL,
-    share_pwd       VARCHAR(64)       NULL,
-    share_id        VARCHAR(128)      NULL,
-    source_key      CHAR(64)      NOT NULL,
-    is_bookmarked   TINYINT(1)    NOT NULL DEFAULT 0,
-    title           VARCHAR(512)      NULL,
-    remark          VARCHAR(1024)     NULL,
-    category        VARCHAR(64)       NULL,
-    status          VARCHAR(16)   NOT NULL DEFAULT 'unknown',
-    last_checked_at BIGINT        NOT NULL DEFAULT 0,
-    file_count      INT           NOT NULL DEFAULT 0,
-    total_size      BIGINT        NOT NULL DEFAULT 0,
-    created_at      BIGINT        NOT NULL,
-    updated_at      BIGINT        NOT NULL,
-    UNIQUE KEY uniq_sources_key (source_key),
-    INDEX idx_sources_bookmarked_created (is_bookmarked, created_at DESC),
-    INDEX idx_sources_provider_share_id (provider, share_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- 应用设置:保存可由前端调整的调度与运行参数。
 CREATE TABLE IF NOT EXISTS app_settings (
     setting_key   VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -51,15 +28,22 @@ CREATE TABLE IF NOT EXISTS shares (
     share_pwd        VARCHAR(64) NOT NULL DEFAULT '',
     share_id         VARCHAR(128) NOT NULL DEFAULT '',
     canonical_key    CHAR(64) NOT NULL,
-    legacy_source_id BIGINT NULL,
+    is_bookmarked   TINYINT(1) NOT NULL DEFAULT 0,
+    title           VARCHAR(512) NOT NULL DEFAULT '',
+    remark          VARCHAR(1024) NOT NULL DEFAULT '',
+    category        VARCHAR(255) NOT NULL DEFAULT '',
     status           VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    last_checked_at  BIGINT NOT NULL DEFAULT 0,
+    file_count       INT NOT NULL DEFAULT 0,
+    total_size       BIGINT NOT NULL DEFAULT 0,
     first_seen_at    BIGINT NOT NULL,
     last_seen_at     BIGINT NOT NULL,
+    created_at       BIGINT NOT NULL,
+    updated_at       BIGINT NOT NULL,
     UNIQUE KEY uniq_shares_key (canonical_key),
-    UNIQUE KEY uniq_shares_legacy_source (legacy_source_id),
     INDEX idx_shares_provider_share_id (provider, share_id),
-    INDEX idx_shares_status_seen (status, last_seen_at),
-    CONSTRAINT fk_shares_legacy_source FOREIGN KEY (legacy_source_id) REFERENCES share_sources(id) ON DELETE SET NULL
+    INDEX idx_shares_bookmarked_created (is_bookmarked, created_at DESC),
+    INDEX idx_shares_status_seen (status, last_seen_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS share_observations (
@@ -142,25 +126,10 @@ CREATE TABLE IF NOT EXISTS github_repository_files (
     CONSTRAINT fk_github_files_repository FOREIGN KEY (repository_id) REFERENCES github_repositories (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS github_share_observations (
-    repository_file_id BIGINT NOT NULL,
-    source_id          BIGINT NOT NULL,
-    title              VARCHAR(512) NOT NULL DEFAULT '',
-    resource_type      VARCHAR(255) NOT NULL DEFAULT '',
-    file_name          VARCHAR(1024) NOT NULL DEFAULT '',
-    updated_at_text    VARCHAR(255) NOT NULL DEFAULT '',
-    active             TINYINT(1) NOT NULL DEFAULT 1,
-    observed_at        BIGINT NOT NULL,
-    PRIMARY KEY (repository_file_id, source_id),
-    INDEX idx_github_observations_source_active (source_id, active),
-    CONSTRAINT fk_github_observations_file FOREIGN KEY (repository_file_id) REFERENCES github_repository_files (id) ON DELETE CASCADE,
-    CONSTRAINT fk_github_observations_source FOREIGN KEY (source_id) REFERENCES share_sources (id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- 资源目录:分享来源中的具体文件。
 CREATE TABLE IF NOT EXISTS resources (
     id         BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    source_id  BIGINT       NOT NULL,
+    share_id   BIGINT       NOT NULL,
     title      VARCHAR(512) NOT NULL,
     poster     VARCHAR(1024)    NULL,
     overview   TEXT             NULL,
@@ -169,10 +138,10 @@ CREATE TABLE IF NOT EXISTS resources (
     created_at BIGINT       NOT NULL,
     updated_at BIGINT       NOT NULL,
     UNIQUE KEY uniq_resources_key (resource_key),
-    INDEX idx_resources_source_path (source_id, file_path(200)),
+    INDEX idx_resources_share_path (share_id, file_path(200)),
     INDEX idx_resources_created_at (created_at DESC),
-    CONSTRAINT fk_resources_source
-        FOREIGN KEY (source_id) REFERENCES share_sources (id) ON DELETE RESTRICT
+    CONSTRAINT fk_resources_share
+        FOREIGN KEY (share_id) REFERENCES shares (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS media_content_analysis (
