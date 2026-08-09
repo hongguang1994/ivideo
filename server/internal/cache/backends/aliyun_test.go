@@ -84,6 +84,16 @@ func baseConfig(refreshToken string) config.Config {
 	}
 }
 
+func TestAliyunTVTokenUsesMainlandOpenListNode(t *testing.T) {
+	a := &Aliyun{}
+	for _, extra := range []string{"alicloud_tv", "alicloud_qr"} {
+		gotURL, gotStyle := a.renewTargetFor(extra)
+		if gotURL != "https://api.oplist.org.cn/alicloud/renewapi" || gotStyle != renewStyleOPList {
+			t.Errorf("renewTargetFor(%q) = (%q, %q)", extra, gotURL, gotStyle)
+		}
+	}
+}
+
 func shareFromEnv() cache.ShareRef {
 	return cache.ShareRef{
 		Provider: "aliyun",

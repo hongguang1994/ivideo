@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -39,7 +40,7 @@ type Config struct {
 	StrmAutoInterval int
 
 	// ---- 数据库 ----
-	DBDriver string // sqlite(默认) / mysql
+	DBDriver string // mysql(正式部署) / sqlite(显式本地开发)
 	DBDSN    string // mysql 用:user:pass@tcp(host:3306)/ivideo?charset=utf8mb4
 
 	// ---- 按需转存缓存 ----
@@ -51,6 +52,15 @@ type Config struct {
 	CacheCleanInterval int    // 清理任务间隔（分钟）
 	CacheStopGrace     int    // 停止播放后多久删（分钟，会话感知）
 	TokenRefreshMin    int    // 令牌保活定时刷新间隔（分钟，0=关闭）
+	ShareCheckInterval int    // 分享可用性检查间隔（分钟，0=关闭）
+
+	// ---- 独立资源发现引擎 ----
+	DiscoveryConcurrency      int      // 同时执行的来源插件数
+	DiscoveryTimeoutSeconds   int      // 单个来源超时
+	DiscoveryQuickWaitSeconds int      // 首屏最多等待时间，慢来源在后台继续
+	DiscoveryCacheMinutes     int      // 查询结果缓存时间
+	DiscoveryMaxResults       int      // 单次返回结果上限
+	DiscoveryTelegramChannels []string // Telegram 公开频道（不需要登录凭据）
 
 	// ---- 分享导入 ----
 	ImportMaxDepth int // 导入分享时最大递归深度
@@ -151,9 +161,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("stream.original_max_mbps", 3.5)
 	v.SetDefault("strm.auto_interval_minutes", 30)
 
-	v.SetDefault("db.driver", "sqlite")
+	v.SetDefault("db.driver", "mysql")
 	v.SetDefault("db.dsn", "")
-	v.SetDefault("db_path", "./ivideo.db")
+	v.SetDefault("db_path", "./ivideo.db") // sqlite 仅用于显式本地开发
 	v.SetDefault("cache.backend", "fake")
 	v.SetDefault("cache.dir", "/ivideo-cache")
 	v.SetDefault("cache.max_bytes", int64(200*1024*1024*1024)) // 200 GB
@@ -161,6 +171,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.clean_interval_minutes", 10)
 	v.SetDefault("cache.stop_grace_minutes", 10)
 	v.SetDefault("cache.token_refresh_minutes", 30)
+	v.SetDefault("share_check_interval_minutes", 15)
+	v.SetDefault("discovery.concurrency", 4)
+	v.SetDefault("discovery.timeout_seconds", 18)
+	v.SetDefault("discovery.quick_wait_seconds", 4)
+	v.SetDefault("discovery.cache_minutes", 10)
+	v.SetDefault("discovery.max_results", 200)
+	v.SetDefault("discovery.telegram_channels", []string{"tgsearchers3", "share_aliyun", "Quark_Movies", "Lsp115"})
 
 	v.SetDefault("aliyun.list_cache_seconds", 60)
 
@@ -192,13 +209,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("log.format", "text")
 }
 
-// Load 按「默认值 → 配置文件 → 环境变量」加载配置。cfgFile 为空则自动查找 ./conf/conf.json。
+// Load 按「默认值 → 配置文件 → 环境变量」加载配置。cfgFile 为空则查找 YAML 配置文件。
 func Load(cfgFile string) (Config, error) {
 	v, err := newViper(cfgFile)
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{
+	cfg := Config{
 		Port:             v.GetString("server.port"),
 		OpenListBaseURL:  strings.TrimRight(v.GetString("openlist.base_url"), "/"),
 		OpenListUsername: v.GetString("openlist.username"),
@@ -213,19 +230,26 @@ func Load(cfgFile string) (Config, error) {
 		OriginalMaxMbps:  v.GetFloat64("stream.original_max_mbps"),
 		StrmAutoInterval: v.GetInt("strm.auto_interval_minutes"),
 
-		DBDriver:               v.GetString("db.driver"),
-		DBDSN:                  v.GetString("db.dsn"),
-		DBPath:                 v.GetString("db_path"),
-		CacheBackend:           v.GetString("cache.backend"),
-		CacheDir:               v.GetString("cache.dir"),
-		CacheMaxBytes:          v.GetInt64("cache.max_bytes"),
-		CacheTTLHours:          v.GetInt("cache.ttl_hours"),
-		CacheStopGrace:         v.GetInt("cache.stop_grace_minutes"),
-		TokenRefreshMin:        v.GetInt("cache.token_refresh_minutes"),
-		AliyunListCacheSeconds: v.GetInt("aliyun.list_cache_seconds"),
-		ImportMaxDepth:         v.GetInt("import.max_depth"),
-		ImportMaxFiles:         v.GetInt("import.max_files"),
-		CacheCleanInterval:     v.GetInt("cache.clean_interval_minutes"),
+		DBDriver:                  v.GetString("db.driver"),
+		DBDSN:                     v.GetString("db.dsn"),
+		DBPath:                    v.GetString("db_path"),
+		CacheBackend:              v.GetString("cache.backend"),
+		CacheDir:                  v.GetString("cache.dir"),
+		CacheMaxBytes:             v.GetInt64("cache.max_bytes"),
+		CacheTTLHours:             v.GetInt("cache.ttl_hours"),
+		CacheStopGrace:            v.GetInt("cache.stop_grace_minutes"),
+		TokenRefreshMin:           v.GetInt("cache.token_refresh_minutes"),
+		ShareCheckInterval:        v.GetInt("share_check_interval_minutes"),
+		DiscoveryConcurrency:      v.GetInt("discovery.concurrency"),
+		DiscoveryTimeoutSeconds:   v.GetInt("discovery.timeout_seconds"),
+		DiscoveryQuickWaitSeconds: v.GetInt("discovery.quick_wait_seconds"),
+		DiscoveryCacheMinutes:     v.GetInt("discovery.cache_minutes"),
+		DiscoveryMaxResults:       v.GetInt("discovery.max_results"),
+		DiscoveryTelegramChannels: v.GetStringSlice("discovery.telegram_channels"),
+		AliyunListCacheSeconds:    v.GetInt("aliyun.list_cache_seconds"),
+		ImportMaxDepth:            v.GetInt("import.max_depth"),
+		ImportMaxFiles:            v.GetInt("import.max_files"),
+		CacheCleanInterval:        v.GetInt("cache.clean_interval_minutes"),
 
 		AliyunRefreshToken:     v.GetString("aliyun.refresh_token"),
 		AliyunOpenRefreshToken: v.GetString("aliyun.open_refresh_token"),
@@ -249,5 +273,33 @@ func Load(cfgFile string) (Config, error) {
 		LogFormat: v.GetString("log.format"),
 
 		VideoExts: []string{".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".m4v", ".ts"},
-	}, nil
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// Validate 在启动前拒绝不完整或不受支持的关键配置，避免悄悄连接到错误的数据源。
+func (c Config) Validate() error {
+	switch c.DBDriver {
+	case "mysql":
+		if strings.TrimSpace(c.DBDSN) == "" {
+			return fmt.Errorf("db.dsn 不能为空（MySQL 为默认数据库；可通过 DB_DSN 环境变量设置）")
+		}
+	case "sqlite":
+		if strings.TrimSpace(c.DBPath) == "" {
+			return fmt.Errorf("db_path 不能为空（SQLite 本地开发模式）")
+		}
+	default:
+		return fmt.Errorf("不支持的 db.driver %q（支持 mysql / sqlite）", c.DBDriver)
+	}
+
+	if c.StrmMode != "hls" && c.StrmMode != "original" {
+		return fmt.Errorf("不支持的 strm.mode %q（支持 hls / original）", c.StrmMode)
+	}
+	if strings.TrimSpace(c.SiteURL) == "" {
+		return fmt.Errorf("site_url 不能为空")
+	}
+	return nil
 }

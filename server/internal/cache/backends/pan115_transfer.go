@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -35,6 +34,15 @@ func (p *Pan115) webCookie() string {
 	return ""
 }
 
+// webHeaders 是 115 网页接口共用的请求头。
+func (p *Pan115) webHeaders() map[string]string {
+	h := map[string]string{"User-Agent": Pan115UA}
+	if ck := p.webCookie(); ck != "" {
+		h["Cookie"] = ck
+	}
+	return h
+}
+
 // parseShareCode 从分享链接 + 提取码解析 share_code / receive_code。
 func parseShareCode(shareURL, pwd string) (shareCode, receiveCode string) {
 	if m := reShareCode.FindStringSubmatch(shareURL); m != nil {
@@ -61,20 +69,12 @@ func (p *Pan115) keepAliveCookie(ctx context.Context) {
 	if ck == "" {
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		pan115Web+"/files?aid=1&cid=0&offset=0&limit=1", nil)
-	if err != nil {
-		return
-	}
-	req.Header.Set("User-Agent", Pan115UA)
-	req.Header.Set("Cookie", ck)
-	resp, err := p.http.Do(req)
-	if err != nil {
+	if err := doHTTP(ctx, p.http, httpReq{
+		Method: http.MethodGet, URL: pan115Web + "/files?aid=1&cid=0&offset=0&limit=1",
+		Headers: p.webHeaders(), Label: "115 cookie 保活",
+	}, nil); err != nil {
 		slog.Warn("115 cookie 保活请求失败", "err", err)
-		return
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 type pan115SnapItem struct {
@@ -108,24 +108,6 @@ func (p *Pan115) shareSnap(ctx context.Context, shareCode, receiveCode, cid stri
 	if cid != "" {
 		q.Set("cid", cid) // 进子目录
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pan115Web+"/share/snap?"+q.Encode(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", Pan115UA)
-	if ck := p.webCookie(); ck != "" {
-		req.Header.Set("Cookie", ck)
-	}
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	// 115 触发频率限流时会返回 HTML 错误页（而非 JSON），给出可读提示而不是解析错误。
-	if len(raw) > 0 && raw[0] == '<' {
-		return nil, fmt.Errorf("115 接口暂时限流（返回了网页而非数据），请过一会儿再试")
-	}
 	var out struct {
 		State bool   `json:"state"`
 		Error string `json:"error"`
@@ -133,7 +115,10 @@ func (p *Pan115) shareSnap(ctx context.Context, shareCode, receiveCode, cid stri
 			List []pan115SnapItem `json:"list"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := doHTTP(ctx, p.http, httpReq{
+		Method: http.MethodGet, URL: pan115Web + "/share/snap?" + q.Encode(),
+		Headers: p.webHeaders(), Label: "115",
+	}, &out); err != nil {
 		return nil, err
 	}
 	if !out.State {
@@ -198,26 +183,16 @@ func (p *Pan115) shareReceive(ctx context.Context, shareCode, receiveCode, fileI
 		"file_id":      {fileID},
 		"cid":          {cid},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pan115Web+"/share/receive",
-		strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", Pan115UA)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Cookie", cookie)
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
 	var out struct {
 		State bool   `json:"state"`
 		Errno int    `json:"errno"`
 		Error string `json:"error"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	body, ctype := formBody(form)
+	if err := doHTTP(ctx, p.http, httpReq{
+		Method: http.MethodPost, URL: pan115Web + "/share/receive",
+		Headers: p.webHeaders(), Body: body, CType: ctype, Label: "115",
+	}, &out); err != nil {
 		return err
 	}
 	if !out.State {

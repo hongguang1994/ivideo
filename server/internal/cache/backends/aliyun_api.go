@@ -1,11 +1,8 @@
 package backends
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -29,67 +26,26 @@ const (
 	pathOpenDownload    = "/adrive/v1.0/openFile/getDownloadUrl" // openBase：开放接口取原画直链
 )
 
-// doJSON 发一个 JSON 请求并把响应解到 out；非 2xx 返回带响应体的错误。
+// doJSON 发一个 JSON 请求并把响应解到 out。写操作默认只提交一次。
 func (a *Aliyun) doJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
+	return a.doJSONRetry(ctx, url, headers, body, out, false)
+}
+
+// doJSONRetry 仅用于明确无副作用的查询接口；转存、删除和令牌刷新不能重试。
+func (a *Aliyun) doJSONRetry(ctx context.Context, url string, headers map[string]string, body, out any, retry bool) error {
 	var payload []byte
+	var ctype string
 	if body != nil {
-		b, err := json.Marshal(body)
+		b, ct, err := jsonBody(body)
 		if err != nil {
 			return err
 		}
-		payload = b
+		payload, ctype = b, ct
 	}
-
-	// 阿里对高频调用会返回 429 TooManyRequests；对 429/408/5xx 指数退避重试，
-	// 比直接失败可靠得多（批量导入/遍历分享时尤其明显）。
-	const maxAttempts = 4
-	delay := 500 * time.Millisecond
-	var lastErr error
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-			delay *= 2
-		}
-
-		var rd io.Reader
-		if payload != nil {
-			rd = bytes.NewReader(payload)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, rd)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-
-		resp, err := a.http.Do(req)
-		if err != nil {
-			lastErr = err // 网络抖动，重试
-			continue
-		}
-		raw, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if out != nil && len(raw) > 0 {
-				return json.Unmarshal(raw, out)
-			}
-			return nil
-		}
-
-		lastErr = fmt.Errorf("阿里接口 %s 返回 %d: %s", url, resp.StatusCode, truncateBody(raw))
-		if !retryableStatus(resp.StatusCode) {
-			return lastErr // 其余 4xx 是请求本身的问题，重试无意义
-		}
-	}
-	return lastErr
+	return doHTTP(ctx, a.http, httpReq{
+		Method: http.MethodPost, URL: url, Headers: headers,
+		Body: payload, CType: ctype, Retry: retry, Label: "阿里",
+	}, out)
 }
 
 // retryableStatus 判断该状态码是否值得退避重试（限流 / 超时 / 服务端错误）。
@@ -173,7 +129,7 @@ func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
 		DefaultDriveID  string `json:"default_drive_id"`
 	}
 	headers := map[string]string{"Authorization": "Bearer " + accessTok}
-	if err := a.doJSON(ctx, a.userBase+pathUserGet, headers, map[string]any{}, &out); err != nil {
+	if err := a.doJSONRetry(ctx, a.userBase+pathUserGet, headers, map[string]any{}, &out, true); err != nil {
 		return fmt.Errorf("获取网盘信息失败: %w", err)
 	}
 	d := out.ResourceDriveID // 优先资源盘（转存/HLS 更稳）
@@ -195,10 +151,12 @@ func (a *Aliyun) ensureDrive(ctx context.Context, accessTok string) error {
 // 在线 token 中转服务的两种调用形态。两家用的是各自注册的开放平台应用，
 // 阿里按 client_id 限速，换一家有可能拿到不同的下载配额。
 const (
-	renewStyleOPList = "oplist" // api.oplist.org：GET ?refresh_ui=&driver_txt=
+	renewStyleOPList = "oplist" // api.oplist.org.cn：GET ?refresh_ui=&driver_txt=
 	renewStyleAList  = "alist"  // api.alistgo.com：POST {"grant_type","refresh_token"}
 
-	oplistRenewURL = "https://api.oplist.org/alicloud/renewapi"
+	// 全球节点的 TV 授权接口会间歇性返回 500；大陆节点由同一官方项目部署，
+	// 且服务器实测可以稳定生成二维码和刷新 TV token。
+	oplistRenewURL = "https://api.oplist.org.cn/alicloud/renewapi"
 	alistRenewURL  = "https://api.alistgo.com/alist/ali_open/token"
 )
 
@@ -206,7 +164,7 @@ const (
 // 令牌是哪家签发的就必须回哪家续期 —— refresh_token 绑定签发它的 client_id，
 // 拿去别家换会直接被拒。来源记在凭据的 extra 字段里（设置页保存时选的类型）：
 //
-//	alicloud_tv / alicloud_qr —— oplist 签发
+//	alicloud_tv / alicloud_qr —— OpenList 官方服务签发
 //	alist                     —— AList 签发
 //
 // 认不出来源时回落到配置里的默认值。
@@ -223,7 +181,7 @@ func (a *Aliyun) renewTargetFor(extra string) (url, style string) {
 // ---- 开放接口(取原画直链)----
 
 // openAccessToken 取开放接口 access token。
-// 默认走在线 token 服务(OpenList 的 api.oplist.org);若配置了自己的 client_id/secret 则走官方端点。
+// 默认走在线 token 服务(OpenList);若配置了自己的 client_id/secret 则走官方端点。
 func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 	a.mu.Lock()
 	if a.openTok != "" && time.Now().Before(a.openExp) {
@@ -296,23 +254,14 @@ func (a *Aliyun) openAccessToken(ctx context.Context) (string, error) {
 		}
 		u := fmt.Sprintf("%s?refresh_ui=%s&server_use=true&driver_txt=%s",
 			renewURL, url.QueryEscape(rt), url.QueryEscape(driverTxt))
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
+		// 公共节点可能启用浏览器完整性检查，故使用常规浏览器 UA。
+		if err := doHTTP(ctx, a.http, httpReq{
+			Method: http.MethodGet, URL: u, Label: "阿里在线 token 服务", NoRetry: true,
+			Headers: map[string]string{
+				"User-Agent": a.browserUA, "Accept": "application/json, text/plain, */*", "Accept-Language": "zh-CN,zh;q=0.9",
+			},
+		}, &out); err != nil {
 			return "", err
-		}
-		// api.oplist.org 在 Cloudflare 后面，默认的 Go-http-client UA 会被
-		// 浏览器完整性检查拦掉(HTTP 403 / error code: 1010)，故伪装成常规浏览器。
-		req.Header.Set("User-Agent", a.browserUA)
-		req.Header.Set("Accept", "application/json, text/plain, */*")
-		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
-		resp, err := a.http.Do(req)
-		if err != nil {
-			return "", fmt.Errorf("在线 token 服务请求失败: %w", err)
-		}
-		defer resp.Body.Close()
-		raw, _ := io.ReadAll(resp.Body)
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return "", fmt.Errorf("在线 token 服务响应解析失败: %w (%s)", err, truncateBody(raw))
 		}
 	}
 
@@ -361,7 +310,7 @@ func (a *Aliyun) originalURL(ctx context.Context, openTok, fileID string) (strin
 	var out struct {
 		URL string `json:"url"`
 	}
-	if err := a.doJSON(ctx, a.openBase+pathOpenDownload, headers, body, &out); err != nil {
+	if err := a.doJSONRetry(ctx, a.openBase+pathOpenDownload, headers, body, &out, true); err != nil {
 		return "", err
 	}
 	if out.URL == "" {
@@ -376,7 +325,7 @@ func (a *Aliyun) shareToken(ctx context.Context, shareID, sharePwd string) (stri
 		ShareToken string `json:"share_token"`
 	}
 	body := map[string]string{"share_id": shareID, "share_pwd": sharePwd}
-	if err := a.doJSON(ctx, a.apiBase+pathShareToken, nil, body, &out); err != nil {
+	if err := a.doJSONRetry(ctx, a.apiBase+pathShareToken, nil, body, &out, true); err != nil {
 		return "", err
 	}
 	if out.ShareToken == "" {
@@ -421,7 +370,7 @@ func (a *Aliyun) listShare(ctx context.Context, shareID, shareTok, parentID stri
 			Items      []shareItem `json:"items"`
 			NextMarker string      `json:"next_marker"`
 		}
-		if err := a.doJSON(ctx, a.apiBase+pathFileList, headers, body, &out); err != nil {
+		if err := a.doJSONRetry(ctx, a.apiBase+pathFileList, headers, body, &out, true); err != nil {
 			return nil, err
 		}
 		items = append(items, out.Items...)
@@ -585,7 +534,7 @@ func (a *Aliyun) playURL(ctx context.Context, accessTok, fileID string) (string,
 			} `json:"live_transcoding_task_list"`
 		} `json:"video_preview_play_info"`
 	}
-	if err := a.doJSON(ctx, a.apiBase+pathVideoPreview, headers, body, &out); err != nil {
+	if err := a.doJSONRetry(ctx, a.apiBase+pathVideoPreview, headers, body, &out, true); err != nil {
 		return "", err
 	}
 	// 取【画质最高】且已完成的档位。阿里按源分辨率提供:
@@ -649,7 +598,7 @@ func (a *Aliyun) videoDuration(ctx context.Context, accessTok, fileID string) (f
 		} `json:"video_media_metadata"`
 	}
 	headers := map[string]string{"Authorization": "Bearer " + accessTok}
-	if err := a.doJSON(ctx, a.apiBase+pathFileGet, headers, body, &out); err != nil {
+	if err := a.doJSONRetry(ctx, a.apiBase+pathFileGet, headers, body, &out, true); err != nil {
 		return 0, err
 	}
 	if out.VideoMediaMetadata.Duration == "" {

@@ -3,7 +3,9 @@ package handlers
 import (
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -33,17 +35,36 @@ func (h *Handler) FileGateway(c *gin.Context) {
 		resp.Fail(c, http.StatusBadRequest, "非法的资源文件名: "+name)
 		return
 	}
+	resource, err := h.store.GetResource(id)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	// 代理 URL 中的数字 ID 用于稳定寻址；响应仍携带真实文件名和扩展名，
+	// 让 Jellyfin/ffprobe 正确探测媒体格式。元数据识别不依赖这个 URL。
+	if filename := filepath.Base(resource.FilePath); filename != "." && filename != "/" && filename != "" {
+		c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	}
 
 	// HEAD:只报存在性/类型,绝不触发转存。
 	if c.Request.Method == http.MethodHead {
-		item, err := h.cache.Status(id)
-		if err != nil {
-			c.Status(http.StatusNotFound)
-			return
+		contentType := "video/x-matroska"
+		extension := ""
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			extension = strings.ToLower(name[i:])
 		}
-		c.Header("Content-Type", "video/x-matroska")
+		switch extension {
+		case ".mp4", ".m4v", ".mov":
+			contentType = "video/mp4"
+		case ".ts":
+			contentType = "video/mp2t"
+		case ".webm":
+			contentType = "video/webm"
+		}
+		c.Header("Content-Type", contentType)
 		c.Header("Accept-Ranges", "bytes")
-		if item.Status == store.StatusReady && item.Size > 0 {
+		// 已转存时附带真实大小；未转存时仍返回 200，让 Jellyfin 知道逻辑媒体源存在。
+		if item, err := h.cache.Status(id); err == nil && item.Status == store.StatusReady && item.Size > 0 {
 			c.Header("Content-Length", strconv.FormatInt(item.Size, 10))
 		}
 		c.Status(http.StatusOK)
@@ -62,7 +83,7 @@ func (h *Handler) FileGateway(c *gin.Context) {
 
 	// 115 / 夸克的直链不能 302 直跳给播放器（绑 UA / 绑 cookie），经代理转发。
 	if t, ok := h.proxyTarget(res); ok {
-		if err := streamProxy.Stream(c.Writer, c.Request, t); err != nil {
+		if err := mediaProxy.Stream(c.Writer, c.Request, t); err != nil {
 			resp.Fail(c, http.StatusBadGateway, "拉流失败: "+err.Error())
 		}
 		return
@@ -87,22 +108,23 @@ const (
 	quarkReferer = "https://pan.quark.cn/"
 )
 
-// streamProxy 把受限直链转发给播放器（分段/越界钳制/状态码校验见 mediaproxy 包）。
-var streamProxy = mediaproxy.New(mediaproxy.DefaultChunkBytes)
+// mediaProxy 是所有上游媒体请求的统一代理；受限直链再启用分段策略。
+var mediaProxy = mediaproxy.New(mediaproxy.DefaultChunkBytes)
 
 // proxyTarget 判断该资源是否需要经代理转发，并给出对应的鉴权参数。
 // ok=false 表示可以直接 302（阿里）。
 func (h *Handler) proxyTarget(res cache.Resolution) (mediaproxy.Target, bool) {
 	switch {
 	case strings.HasPrefix(res.Item.CachePath, "115:"):
-		return mediaproxy.Target{URL: res.URL, UA: pan115UA, Size: res.Item.Size}, true
+		return mediaproxy.Target{URL: res.URL, UA: pan115UA, Size: res.Item.Size, RangeMode: mediaproxy.RangeChunked}, true
 	case strings.HasPrefix(res.Item.CachePath, "quark:"):
 		return mediaproxy.Target{
-			URL:     res.URL,
-			UA:      quarkUA,
-			Cookie:  h.cache.StreamCookie(res.Item.CachePath),
-			Referer: quarkReferer,
-			Size:    res.Item.Size,
+			URL:       res.URL,
+			UA:        quarkUA,
+			Cookie:    h.cache.StreamCookie(res.Item.CachePath),
+			Referer:   quarkReferer,
+			Size:      res.Item.Size,
+			RangeMode: mediaproxy.RangeChunked,
 		}, true
 	}
 	return mediaproxy.Target{}, false

@@ -27,3 +27,17 @@ func TestCleanMovieTitle(t *testing.T) {
 		fmt.Printf("  [%s] (%d)\n", title, year)
 	}
 }
+
+func TestCleanMovieTitleSplitsYearAttachedToChineseTitle(t *testing.T) {
+	title, year := CleanMovieTitle("Z撞大运2024")
+	if title != "Z撞大运" || year != 2024 {
+		t.Fatalf("CleanMovieTitle() = %q, %d", title, year)
+	}
+}
+
+func TestCleanMovieTitleRemovesSourcePrefixAndTechnicalSuffix(t *testing.T) {
+	title, _ := CleanMovieTitle("【百度云盘下载】熊出没之夺宝熊兵1080p")
+	if title != "熊出没之夺宝熊兵" {
+		t.Fatalf("title=%q", title)
+	}
+}

@@ -12,7 +12,7 @@ import (
 
 // Manager 负责“确保已转存”的编排：点播 → 若未缓存则后台转存（并发去重）→ 就绪后给直链。
 type Manager struct {
-	store    store.Store
+	store    Repository
 	backend  CacheBackend
 	cacheDir string
 
@@ -25,16 +25,32 @@ type Manager struct {
 	// durations 缓存视频时长，避免同一资源反复问网盘。
 	originalMaxMbps float64
 	durations       map[int64]float64
+	diagnostics     map[string]ProviderDiagnostic
+	diagnosticMu    sync.RWMutex
+}
+
+// Repository is the exact persistence contract required by the cache module.
+type Repository interface {
+	GetResource(id int64) (store.Resource, error)
+	GetCacheItem(resourceID int64) (store.CacheItem, error)
+	SetTransferring(resourceID int64, backend string) error
+	SetFailed(resourceID int64, backend, errMsg string) error
+	SetReady(resourceID int64, backend, cachePath, directURL string, size int64) error
+	TouchAccess(resourceID int64) error
+	MarkCleaned(resourceID int64) error
+	ListReady() ([]store.CacheItem, error)
+	ListCredentialProviders() (map[string]bool, error)
 }
 
 // NewManager 创建缓存管理器。
-func NewManager(st store.Store, backend CacheBackend, cacheDir string) *Manager {
+func NewManager(st Repository, backend CacheBackend, cacheDir string) *Manager {
 	return &Manager{
-		store:     st,
-		backend:   backend,
-		cacheDir:  cacheDir,
-		inflight:  make(map[int64]bool),
-		durations: make(map[int64]float64),
+		store:       st,
+		backend:     backend,
+		cacheDir:    cacheDir,
+		inflight:    make(map[int64]bool),
+		durations:   make(map[int64]float64),
+		diagnostics: make(map[string]ProviderDiagnostic),
 	}
 }
 
@@ -180,20 +196,30 @@ func (m *Manager) VerifyProvider(provider string) error {
 
 // ListShare 列出分享内目录(适配器需实现 ShareLister)。
 func (m *Manager) ListShare(share ShareRef, subPath string) ([]ShareEntry, error) {
+	return m.ListShareContext(context.Background(), share, subPath)
+}
+
+// ListShareContext 带超时/取消能力地列出分享目录，供后台健康检查使用。
+func (m *Manager) ListShareContext(ctx context.Context, share ShareRef, subPath string) ([]ShareEntry, error) {
 	p, ok := m.backend.(ShareLister)
 	if !ok {
 		return nil, fmt.Errorf("当前缓存盘适配器(%s)不支持浏览分享", m.backend.Name())
 	}
-	return p.ListShare(context.Background(), share, subPath)
+	return p.ListShare(ctx, share, subPath)
 }
 
 // WalkShare 高效遍历整个分享,返回所有文件条目。ok=false 表示适配器不支持(应回退逐目录)。
 func (m *Manager) WalkShare(share ShareRef) (entries []ShareEntry, ok bool, err error) {
+	return m.WalkShareContext(context.Background(), share)
+}
+
+// WalkShareContext is the cancellable variant used by the importer module.
+func (m *Manager) WalkShareContext(ctx context.Context, share ShareRef) (entries []ShareEntry, ok bool, err error) {
 	w, ok := m.backend.(ShareWalker)
 	if !ok {
 		return nil, false, nil
 	}
-	entries, err = w.WalkShare(context.Background(), share)
+	entries, err = w.WalkShare(ctx, share)
 	return entries, true, err
 }
 

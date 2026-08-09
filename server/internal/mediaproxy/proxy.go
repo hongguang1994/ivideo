@@ -16,12 +16,14 @@
 package mediaproxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultChunkBytes 是分段拉取的块大小。
@@ -31,12 +33,23 @@ const DefaultChunkBytes int64 = 256 << 20
 
 // Target 描述一次转发的上游目标与所需鉴权。
 type Target struct {
-	URL     string // 上游直链
-	UA      string // 必须与取直链时用的 UA 一致（115/夸克都对 UA 敏感）
-	Cookie  string // 需要 cookie 鉴权的网盘（夸克）传入；否则留空
-	Referer string // 需要防盗链校验的网盘传入
-	Size    int64  // 文件总大小，用于把 Range 上界钳制在文件内；未知传 0
+	URL       string    // 上游直链
+	UA        string    // 必须与取直链时用的 UA 一致（115/夸克都对 UA 敏感）
+	Cookie    string    // 需要 cookie 鉴权的网盘（夸克）传入；否则留空
+	Referer   string    // 需要防盗链校验的网盘传入
+	Size      int64     // 文件总大小，用于把 Range 上界钳制在文件内；未知传 0
+	RangeMode RangeMode // Range 透传或内部拆分；零值为直接透传
 }
+
+// RangeMode 定义代理处理客户端 Range 的策略。
+type RangeMode uint8
+
+const (
+	// RangePassthrough 把客户端 Range 原样交给上游，适用于 OpenList/Jellyfin/HLS。
+	RangePassthrough RangeMode = iota
+	// RangeChunked 把开放式 Range 拆为有界片段，适用于 115/夸克受限直链。
+	RangeChunked
+)
 
 // Proxy 执行转发。零值不可用，请用 New。
 type Proxy struct {
@@ -45,12 +58,21 @@ type Proxy struct {
 }
 
 // New 创建代理。chunkBytes<=0 时用 DefaultChunkBytes。
-// http.Client 不设整体超时 —— 播放是长连接，超时会把正常播放掐断。
+// http.Client 不设整体超时 —— 播放是长连接，超时会把正常播放掐断；
+// 但限制首包等待，避免失效直链永久占用连接。
 func New(chunkBytes int64) *Proxy {
 	if chunkBytes <= 0 {
 		chunkBytes = DefaultChunkBytes
 	}
-	return &Proxy{client: &http.Client{}, chunk: chunkBytes}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 20 * time.Second
+	return &Proxy{client: &http.Client{Transport: transport}, chunk: chunkBytes}
+}
+
+// Get 发起非流式上游 GET，供 HLS 播放列表等调用复用鉴权与超时策略。
+// 调用方负责关闭响应体。
+func (p *Proxy) Get(ctx context.Context, t Target) (*http.Response, error) {
+	return p.fetch(ctx, t, "")
 }
 
 // Stream 把上游内容转发给客户端。
@@ -61,11 +83,11 @@ func (p *Proxy) Stream(w http.ResponseWriter, r *http.Request, t Target) error {
 
 	// 开放式区间（无 Range 或 bytes=N-）：客户端要的是「从 N 到文件结尾」的完整内容，
 	// 必须给足长度 —— 只回一个固定块就结束会让播放器/ffmpeg 读到意外 EOF，转码中途失败。
-	if OpenEnded(clientRange) {
+	if t.RangeMode == RangeChunked && OpenEnded(clientRange) {
 		return p.streamChunked(w, r, t, clientRange)
 	}
 
-	up, err := p.fetch(r, t, clientRange)
+	up, err := p.fetch(r.Context(), t, clientRange)
 	if err != nil {
 		return err
 	}
@@ -73,7 +95,9 @@ func (p *Proxy) Stream(w http.ResponseWriter, r *http.Request, t Target) error {
 
 	copyHeaders(w, up)
 	w.WriteHeader(up.StatusCode)
-	_, _ = io.Copy(w, up.Body)
+	if _, err := io.Copy(w, up.Body); err != nil && r.Context().Err() == nil {
+		slog.Warn("上游流读取中断", "err", err)
+	}
 	return nil
 }
 
@@ -82,13 +106,13 @@ func (p *Proxy) streamChunked(w http.ResponseWriter, r *http.Request, t Target, 
 	start := rangeStart(clientRange)
 
 	// 先拉第一段，借它的响应头拿到文件总大小并给客户端定头。
-	first, err := p.fetch(r, t, fmt.Sprintf("bytes=%d-%d", start, BoundedEnd(start, t.Size, p.chunk)))
+	first, err := p.fetch(r.Context(), t, fmt.Sprintf("bytes=%d-%d", start, BoundedEnd(start, t.Size, p.chunk)))
 	if err != nil {
 		return err
 	}
-	if !okStatus(first.StatusCode) {
+	if !validChunkResponse(first, start) {
 		first.Body.Close()
-		return fmt.Errorf("上游拒绝拉流(HTTP %d)", first.StatusCode)
+		return fmt.Errorf("上游未按请求范围返回数据(HTTP %d)", first.StatusCode)
 	}
 	total := TotalFromContentRange(first.Header.Get("Content-Range"))
 	if total <= 0 {
@@ -100,20 +124,26 @@ func (p *Proxy) streamChunked(w http.ResponseWriter, r *http.Request, t Target, 
 	pos := start
 	up := first
 	for {
-		n, _ := io.Copy(w, up.Body)
+		n, copyErr := io.Copy(w, up.Body)
 		up.Body.Close()
 		pos += n
+		if copyErr != nil {
+			if r.Context().Err() != nil {
+				return nil // 客户端已断开，不再请求下一段
+			}
+			slog.Warn("分段拉流读取中断，尝试续传", "pos", pos, "err", copyErr)
+		}
 		if n == 0 || (total > 0 && pos >= total) {
 			return nil // 传完了，或客户端断开
 		}
-		next, err := p.fetch(r, t, fmt.Sprintf("bytes=%d-%d", pos, BoundedEnd(pos, total, p.chunk)))
+		next, err := p.fetch(r.Context(), t, fmt.Sprintf("bytes=%d-%d", pos, BoundedEnd(pos, total, p.chunk)))
 		if err != nil {
 			slog.Warn("分段拉流中断", "pos", pos, "err", err)
 			return nil // 客户端断开或上游出错，正常结束
 		}
 		// **必须检查状态码**：网盘限流/直链过期时会返回 4xx/5xx 的 HTML 错误页，
 		// err 却是 nil。不检查就会把错误页当视频数据拼进流里，播放器必然解析失败。
-		if !okStatus(next.StatusCode) {
+		if !validChunkResponse(next, pos) {
 			next.Body.Close()
 			slog.Warn("分段拉流上游异常，停止拼接", "pos", pos, "上游状态", next.StatusCode)
 			return nil
@@ -123,8 +153,8 @@ func (p *Proxy) streamChunked(w http.ResponseWriter, r *http.Request, t Target, 
 }
 
 // fetch 用指定 Range 向上游发起一次请求。
-func (p *Proxy) fetch(r *http.Request, t Target, rng string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, t.URL, nil)
+func (p *Proxy) fetch(ctx context.Context, t Target, rng string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,8 +203,11 @@ func copyHeaders(w http.ResponseWriter, up *http.Response) {
 	}
 }
 
-func okStatus(code int) bool {
-	return code == http.StatusOK || code == http.StatusPartialContent
+// validChunkResponse 确保上游真的遵守了内部 Range 请求。
+// 有的 CDN 在 Range 无效时会回 200 并从文件头开始；若继续拼接会污染播放流。
+func validChunkResponse(resp *http.Response, wantStart int64) bool {
+	start, _, _, ok := ParseContentRange(resp.Header.Get("Content-Range"))
+	return resp.StatusCode == http.StatusPartialContent && ok && start == wantStart
 }
 
 // OpenEnded 判断 Range 是否「没有上界」（空串，或形如 bytes=0- / bytes=123-）。
@@ -208,13 +241,25 @@ func BoundedEnd(start, size, chunk int64) int64 {
 
 // TotalFromContentRange 从 "bytes 0-33554431/1038876196" 解析文件总大小，失败返回 0。
 func TotalFromContentRange(cr string) int64 {
-	i := strings.LastIndex(cr, "/")
-	if i < 0 {
+	_, _, total, ok := ParseContentRange(cr)
+	if !ok {
 		return 0
 	}
-	n, err := strconv.ParseInt(strings.TrimSpace(cr[i+1:]), 10, 64)
-	if err != nil {
-		return 0
+	return total
+}
+
+// ParseContentRange 解析 "bytes 0-1023/4096"；总大小未知时 total 为 0。
+func ParseContentRange(cr string) (start, end, total int64, ok bool) {
+	var length string
+	if _, err := fmt.Sscanf(strings.TrimSpace(cr), "bytes %d-%d/%s", &start, &end, &length); err != nil || start < 0 || end < start {
+		return 0, 0, 0, false
 	}
-	return n
+	if length == "*" {
+		return start, end, 0, true
+	}
+	total, err := strconv.ParseInt(length, 10, 64)
+	if err != nil || total <= end {
+		return 0, 0, 0, false
+	}
+	return start, end, total, true
 }

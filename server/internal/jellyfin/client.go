@@ -8,6 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -35,6 +38,80 @@ type Item struct {
 	Overview       string            `json:"Overview"`
 	ProductionYear int               `json:"ProductionYear"`
 	ImageTags      map[string]string `json:"ImageTags"`
+	Path           string            `json:"Path"`
+}
+
+// RefreshImagesByPath 要求 Jellyfin 丢弃指定媒体目录下的旧图片记录，重新读取本地图片。
+func (c *Client) RefreshImagesByPath(pathPrefix string) (int, error) {
+	return c.RefreshImagesByPaths([]string{pathPrefix})
+}
+
+// RefreshImagesByPaths 一次读取 Jellyfin 条目并批量刷新多个目录，避免每个作品
+// 都重新拉取整库列表。一个条目命中多个父目录时也只会刷新一次。
+func (c *Client) RefreshImagesByPaths(pathPrefixes []string) (int, error) {
+	q := url.Values{}
+	q.Set("Recursive", "true")
+	q.Set("IncludeItemTypes", "Series,Season,Episode,Movie")
+	q.Set("Fields", "Path")
+
+	var out itemsResp
+	if err := c.getJSON("/Items?"+q.Encode(), &out); err != nil {
+		return 0, err
+	}
+	prefixes := make([]string, 0, len(pathPrefixes))
+	for _, prefix := range pathPrefixes {
+		if strings.TrimSpace(prefix) != "" {
+			prefixes = append(prefixes, filepath.Clean(prefix))
+		}
+	}
+	refreshed := 0
+	for _, item := range out.Items {
+		itemPath := filepath.Clean(item.Path)
+		matched := false
+		for _, prefix := range prefixes {
+			if itemPath == prefix || strings.HasPrefix(itemPath, prefix+string(filepath.Separator)) {
+				matched = true
+				break
+			}
+		}
+		if item.Path == "" || !matched {
+			continue
+		}
+		params := url.Values{}
+		params.Set("metadataRefreshMode", "None")
+		params.Set("imageRefreshMode", "FullRefresh")
+		params.Set("replaceAllImages", "true")
+		if err := c.post("/Items/" + url.PathEscape(item.ID) + "/Refresh?" + params.Encode()); err != nil {
+			return refreshed, fmt.Errorf("刷新 %s 图片: %w", item.Name, err)
+		}
+		refreshed++
+	}
+	return refreshed, nil
+}
+
+// RefreshCollectionImages 清除媒体库集合自身的旧封面，并要求 Jellyfin 根据
+// 当前库内容重新生成。作品已经迁移后，集合封面不会随普通扫库自动失效。
+func (c *Client) RefreshCollectionImages(name string) error {
+	var folders []virtualFolder
+	if err := c.getJSON("/Library/VirtualFolders", &folders); err != nil {
+		return err
+	}
+	for _, folder := range folders {
+		if folder.Name != name || folder.ItemID == "" {
+			continue
+		}
+		for _, imageType := range []string{"Primary", "Backdrop"} {
+			if err := c.delete("/Items/" + url.PathEscape(folder.ItemID) + "/Images/" + imageType); err != nil {
+				return fmt.Errorf("清除 %s 媒体库封面: %w", name, err)
+			}
+		}
+		params := url.Values{}
+		params.Set("metadataRefreshMode", "FullRefresh")
+		params.Set("imageRefreshMode", "FullRefresh")
+		params.Set("replaceAllImages", "true")
+		return c.post("/Items/" + url.PathEscape(folder.ItemID) + "/Refresh?" + params.Encode())
+	}
+	return fmt.Errorf("Jellyfin 中未找到 %q 媒体库", name)
 }
 
 // itemsResp 是 /Items 的响应结构。
@@ -51,7 +128,7 @@ func (c *Client) Items(itemTypes string) ([]Item, error) {
 	q := url.Values{}
 	q.Set("Recursive", "true")
 	q.Set("IncludeItemTypes", itemTypes)
-	q.Set("Fields", "Overview,ProductionYear")
+	q.Set("Fields", "Overview,ProductionYear,Path")
 	q.Set("SortBy", "SortName")
 	q.Set("SortOrder", "Ascending")
 
@@ -60,6 +137,30 @@ func (c *Client) Items(itemTypes string) ([]Item, error) {
 		return nil, err
 	}
 	return out.Items, nil
+}
+
+// RemoveMissingItems 删除 Jellyfin 中指向项目媒体目录、但本地文件已不存在的旧索引。
+func (c *Client) RemoveMissingItems(mediaDir string) (int, error) {
+	items, err := c.Items("Movie,Series,Season,Episode")
+	if err != nil {
+		return 0, err
+	}
+	prefix := filepath.Clean(mediaDir)
+	removed := 0
+	for _, item := range items {
+		p := filepath.Clean(item.Path)
+		if item.Path == "" || (p != prefix && !strings.HasPrefix(p, prefix+string(filepath.Separator))) {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil || !os.IsNotExist(err) {
+			continue
+		}
+		if err := c.delete("/Items/" + url.PathEscape(item.ID)); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 // ImageURL 返回某条目主海报的内部访问地址（带 api_key，供后端代理拉取）。
@@ -122,7 +223,11 @@ func (c *Client) NowPlaying() ([]PlayingItem, error) {
 // RefreshLibrary 触发 Jellyfin 扫描媒体库（异步，立即返回）。
 // strm 有新增/删除后调用，新剧集才会出现在库里。
 func (c *Client) RefreshLibrary() error {
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/Library/Refresh", nil)
+	return c.post("/Library/Refresh")
+}
+
+func (c *Client) post(path string) error {
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -137,6 +242,27 @@ func (c *Client) RefreshLibrary() error {
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("jellyfin: 扫库接口返回 %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (c *Client) delete(path string) error {
+	req, err := http.NewRequest(http.MethodDelete, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Emby-Token", c.apiKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// 扫库期间 Jellyfin 可能已经自动删除该旧条目，视为清理成功。
+		return nil
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("jellyfin: 删除旧条目返回 %d", resp.StatusCode)
 	}
 	return nil
 }

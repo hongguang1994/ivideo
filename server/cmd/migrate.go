@@ -19,7 +19,7 @@ var (
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "迁移数据到另一个数据库(如 SQLite → MySQL)",
-	Long: "把源库全部数据(resources / cache_items / credentials)复制到目标库。\n" +
+	Long: "把旧版数据迁到新模型(provider_credentials / share_sources / resources / cache_items)。\n" +
 		"目标应为空库。示例:\n" +
 		"  ivideo migrate --from /data/ivideo.db \\\n" +
 		"    --to-driver mysql --to 'root:pass@tcp(mysql:3306)/ivideo?charset=utf8mb4'",

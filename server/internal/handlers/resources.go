@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -19,6 +20,9 @@ func (h *Handler) ListResources(c *gin.Context) {
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if items == nil {
+		items = []store.Resource{}
+	}
 	resp.OK(c, gin.H{"items": items})
 }
 
@@ -36,6 +40,10 @@ func (h *Handler) AddResource(c *gin.Context) {
 	}
 	id, err := h.store.AddResource(r)
 	if err != nil {
+		if errors.Is(err, store.ErrResourceExists) {
+			resp.Fail(c, http.StatusConflict, "该资源已入库")
+			return
+		}
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -1,8 +1,8 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
-	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -10,7 +10,7 @@ import (
 	"ivideo/server/internal/resp"
 
 	"ivideo/server/internal/cache"
-	"ivideo/server/internal/store"
+	"ivideo/server/internal/importer"
 )
 
 // BrowseShare 列出分享内某目录，供前端挑选要导入的子目录。
@@ -27,6 +27,10 @@ func (h *Handler) BrowseShare(c *gin.Context) {
 		SharePwd: c.Query("sharePwd"),
 	}, c.Query("path"))
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
+			resp.Fail(c, http.StatusTooManyRequests, "网盘接口当前触发限流，请稍后再试")
+			return
+		}
 		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -83,108 +87,7 @@ func (h *Handler) ImportShare(c *gin.Context) {
 	if req.Provider == "" {
 		req.Provider = "aliyun"
 	}
-	// FilePath 作为遍历起点:传了 path 就只导那个子目录（精简导入）。
-	share := cache.ShareRef{Provider: req.Provider, ShareURL: req.ShareURL, SharePwd: req.SharePwd, FilePath: req.Path}
-
-	maxDepth := h.cfg.ImportMaxDepth
-	maxFiles := h.cfg.ImportMaxFiles
-
-	// 已有资源的 (shareUrl, filePath) 集合，用于去重。
-	existing := map[string]bool{}
-	if list, err := h.store.ListResources(); err == nil {
-		for _, r := range list {
-			existing[r.ShareURL+"\x00"+r.FilePath] = true
-		}
-	}
-
-	var (
-		added   int
-		skipped int
-		errs    []string
-	)
-
-	// 优先高效遍历（一次 share_token + file_id 递归 + 429 退避），避免限流。
-	if entries, ok, werr := h.cache.WalkShare(share); ok {
-		if werr != nil {
-			errs = append(errs, werr.Error())
-		}
-		for _, e := range entries {
-			if added >= maxFiles {
-				break
-			}
-			if e.IsDir || !h.isVideo(e.Name) {
-				continue
-			}
-			if existing[req.ShareURL+"\x00"+e.Path] {
-				skipped++
-				continue
-			}
-			title := strings.TrimSuffix(e.Name, path.Ext(e.Name))
-			if _, err := h.store.AddResource(store.Resource{
-				Title: title, Provider: req.Provider, ShareURL: req.ShareURL,
-				SharePwd: req.SharePwd, FilePath: e.Path,
-			}); err != nil {
-				errs = append(errs, e.Path+": "+err.Error())
-				continue
-			}
-			existing[req.ShareURL+"\x00"+e.Path] = true
-			added++
-		}
-	} else {
-
-		// 广度优先遍历，带深度与数量上限。
-		type node struct {
-			path  string
-			depth int
-		}
-		queue := []node{{path: req.Path, depth: 0}}
-		for len(queue) > 0 && added < maxFiles {
-			cur := queue[0]
-			queue = queue[1:]
-
-			entries, err := h.cache.ListShare(share, cur.path)
-			if err != nil {
-				errs = append(errs, cur.path+": "+err.Error())
-				continue
-			}
-			for _, e := range entries {
-				if e.IsDir {
-					if cur.depth < maxDepth {
-						queue = append(queue, node{path: e.Path, depth: cur.depth + 1})
-					}
-					continue
-				}
-				if !h.isVideo(e.Name) {
-					continue
-				}
-				if existing[req.ShareURL+"\x00"+e.Path] {
-					skipped++
-					continue
-				}
-				if added >= maxFiles {
-					break
-				}
-				title := strings.TrimSuffix(e.Name, path.Ext(e.Name))
-				if _, err := h.store.AddResource(store.Resource{
-					Title:    title,
-					Provider: req.Provider,
-					ShareURL: req.ShareURL,
-					SharePwd: req.SharePwd,
-					FilePath: e.Path,
-				}); err != nil {
-					errs = append(errs, e.Path+": "+err.Error())
-					continue
-				}
-				existing[req.ShareURL+"\x00"+e.Path] = true
-				added++
-			}
-		}
-	}
-
-	// 导入即生成 strm：新资源立刻出现在 Jellyfin 媒体库里，不用再手动点一次。
-	if added > 0 {
-		h.autoGenerateStrm("import")
-	}
+	added, skipped, errs := h.importShareResources(c.Request.Context(), cache.ShareRef{Provider: req.Provider, ShareURL: req.ShareURL, SharePwd: req.SharePwd, FilePath: req.Path}, "manual import", false)
 
 	out := gin.H{"added": added, "skipped": skipped}
 	if len(errs) > 0 {
@@ -193,8 +96,18 @@ func (h *Handler) ImportShare(c *gin.Context) {
 		}
 		out["errors"] = errs
 	}
-	if added >= maxFiles {
+	if added >= h.cfg.ImportMaxFiles {
 		out["note"] = "已达单次导入上限，可对子目录再次导入"
 	}
 	resp.OK(c, out)
+}
+
+// importShareResources 遍历一个分享并把视频文件写入资源库。
+// 手动导入与定时导入共用此核心，避免两条导入链路产生不同结果。
+func (h *Handler) importShareResources(ctx context.Context, share cache.ShareRef, trigger string, deferEvent bool) (added, skipped int, errs []string) {
+	result := h.importer.Import(ctx, importer.ShareRef{
+		Provider: share.Provider, URL: share.ShareURL, Password: share.SharePwd, Path: share.FilePath,
+		Trigger: trigger, DeferEvent: deferEvent,
+	})
+	return result.Added, result.Skipped, result.Errors
 }

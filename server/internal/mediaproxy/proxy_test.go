@@ -95,7 +95,7 @@ func TestStreamOpenEndedGetsFullContent(t *testing.T) {
 	req.Header.Set("Range", "bytes=0-")
 	rec := httptest.NewRecorder()
 
-	if err := p.Stream(rec, req, Target{URL: up.URL, Size: int64(len(content))}); err != nil {
+	if err := p.Stream(rec, req, Target{URL: up.URL, Size: int64(len(content)), RangeMode: RangeChunked}); err != nil {
 		t.Fatalf("Stream 出错: %v", err)
 	}
 	if rec.Code != http.StatusPartialContent {
@@ -122,7 +122,7 @@ func TestStreamNoRangeReturns200(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
-	if err := p.Stream(rec, req, Target{URL: up.URL, Size: int64(len(content))}); err != nil {
+	if err := p.Stream(rec, req, Target{URL: up.URL, Size: int64(len(content)), RangeMode: RangeChunked}); err != nil {
 		t.Fatalf("Stream 出错: %v", err)
 	}
 	if rec.Code != http.StatusOK {
@@ -179,7 +179,7 @@ func TestStreamStopsOnUpstreamError(t *testing.T) {
 	req.Header.Set("Range", "bytes=0-")
 	rec := httptest.NewRecorder()
 
-	if err := p.Stream(rec, req, Target{URL: up.URL, Size: 100}); err != nil {
+	if err := p.Stream(rec, req, Target{URL: up.URL, Size: 100, RangeMode: RangeChunked}); err != nil {
 		t.Fatalf("Stream 出错: %v", err)
 	}
 	if body := rec.Body.String(); body != good {
@@ -199,8 +199,34 @@ func TestStreamFirstChunkFailReturnsError(t *testing.T) {
 	req.Header.Set("Range", "bytes=0-")
 	rec := httptest.NewRecorder()
 
-	if err := p.Stream(rec, req, Target{URL: up.URL, Size: 100}); err == nil {
+	if err := p.Stream(rec, req, Target{URL: up.URL, Size: 100, RangeMode: RangeChunked}); err == nil {
 		t.Error("首段失败时应返回 error")
+	}
+}
+
+func TestStreamChunkedRejectsIgnoredRange(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK) // CDN 忽略 Range，错误地从文件头返回
+		_, _ = w.Write([]byte("full file from start"))
+	}))
+	defer up.Close()
+
+	p := New(128)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Range", "bytes=10-")
+	rec := httptest.NewRecorder()
+	if err := p.Stream(rec, req, Target{URL: up.URL, Size: 100, RangeMode: RangeChunked}); err == nil {
+		t.Fatal("上游忽略 Range 时应拒绝拼接")
+	}
+}
+
+func TestParseContentRange(t *testing.T) {
+	start, end, total, ok := ParseContentRange("bytes 10-19/100")
+	if !ok || start != 10 || end != 19 || total != 100 {
+		t.Fatalf("解析错误: start=%d end=%d total=%d ok=%v", start, end, total, ok)
+	}
+	if _, _, _, ok := ParseContentRange("bytes 10-9/100"); ok {
+		t.Fatal("倒置范围不应通过")
 	}
 }
 

@@ -12,14 +12,18 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ivideo/server/internal/cache"
+	"ivideo/server/internal/mediaproxy"
 	"ivideo/server/internal/resp"
 )
 
+const maxPlaylistBytes = 2 << 20
+
 // hlsHostAllowed 判断上游主机是否在配置的白名单里(防止变成任意 URL 的开放代理)。
 func (h *Handler) hlsHostAllowed(host string) bool {
-	host = strings.ToLower(host)
-	for _, s := range h.cfg.HLSAllowedHosts {
-		if s != "" && strings.Contains(host, strings.ToLower(s)) {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	for _, allowed := range h.cfg.HLSAllowedHosts {
+		allowed = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(allowed)), ".")
+		if allowed != "" && (host == allowed || strings.HasSuffix(host, "."+allowed)) {
 			return true
 		}
 	}
@@ -45,7 +49,7 @@ func (h *Handler) decodeUpstream(name string) (string, bool) {
 	}
 	raw := string(b)
 	u, err := url.Parse(raw)
-	if err != nil || !h.hlsHostAllowed(u.Host) {
+	if err != nil || !h.hlsHostAllowed(u.Hostname()) {
 		return "", false
 	}
 	return raw, true
@@ -108,18 +112,30 @@ func (h *Handler) servePlaylist(c *gin.Context, id int64) {
 // renderPlaylist 拉取上游 m3u8,把其中的地址改写成走本站同源代理。
 func (h *Handler) renderPlaylist(c *gin.Context, m3u8URL string) {
 	base, err := url.Parse(m3u8URL)
-	if err != nil || !h.hlsHostAllowed(base.Host) {
+	if err != nil || !h.hlsHostAllowed(base.Hostname()) {
 		resp.Fail(c, http.StatusBadRequest, "非法的 m3u8 地址")
 		return
 	}
 
-	httpResp, err := http.Get(m3u8URL)
+	httpResp, err := mediaProxy.Get(c.Request.Context(), mediaproxy.Target{URL: m3u8URL})
 	if err != nil {
 		resp.Fail(c, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer httpResp.Body.Close()
-	body, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
+		resp.Fail(c, http.StatusBadGateway, "上游播放列表返回 "+httpResp.Status)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxPlaylistBytes+1))
+	if err != nil {
+		resp.Fail(c, http.StatusBadGateway, "读取上游播放列表失败: "+err.Error())
+		return
+	}
+	if len(body) > maxPlaylistBytes {
+		resp.Fail(c, http.StatusBadGateway, "上游播放列表过大")
+		return
+	}
 
 	var b strings.Builder
 	for _, line := range strings.Split(string(body), "\n") {
@@ -165,7 +181,7 @@ func (h *Handler) HLSSegmentFile(c *gin.Context) {
 func (h *Handler) HLSSegment(c *gin.Context) {
 	raw := c.Query("u")
 	u, err := url.Parse(raw)
-	if err != nil || !h.hlsHostAllowed(u.Host) {
+	if err != nil || !h.hlsHostAllowed(u.Hostname()) {
 		resp.Fail(c, http.StatusBadRequest, "非法切片地址")
 		return
 	}

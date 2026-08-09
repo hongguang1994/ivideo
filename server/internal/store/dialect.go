@@ -42,9 +42,9 @@ var sqliteDialect = dialect{
 		 VALUES (?, ?, ?, 0, 0, ?, ?)
 		 ON CONFLICT(resource_id) DO UPDATE SET
 		    backend=excluded.backend, status=excluded.status, error=excluded.error, updated_at=excluded.updated_at`,
-	upsertCredential: `INSERT INTO credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
+	upsertCredential: `INSERT INTO provider_credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, extra=excluded.extra, updated_at=excluded.updated_at`,
-	upsertCredToken: `INSERT INTO credentials (provider, token, updated_at) VALUES (?, ?, ?)
+	upsertCredToken: `INSERT INTO provider_credentials (provider, token, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, updated_at=excluded.updated_at`,
 }
 
@@ -62,9 +62,9 @@ var mysqlDialect = dialect{
 		 VALUES (?, ?, ?, 0, 0, ?, ?)
 		 ON DUPLICATE KEY UPDATE
 		    backend=VALUES(backend), status=VALUES(status), error=VALUES(error), updated_at=VALUES(updated_at)`,
-	upsertCredential: `INSERT INTO credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
+	upsertCredential: `INSERT INTO provider_credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE token=VALUES(token), extra=VALUES(extra), updated_at=VALUES(updated_at)`,
-	upsertCredToken: `INSERT INTO credentials (provider, token, updated_at) VALUES (?, ?, ?)
+	upsertCredToken: `INSERT INTO provider_credentials (provider, token, updated_at) VALUES (?, ?, ?)
 		 ON DUPLICATE KEY UPDATE token=VALUES(token), updated_at=VALUES(updated_at)`,
 }
 

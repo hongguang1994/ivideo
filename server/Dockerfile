@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/ivideo-server .
 
 FROM alpine:3.20
 WORKDIR /app
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates ffmpeg tesseract-ocr tesseract-ocr-data-chi_sim tesseract-ocr-data-eng
 COPY --from=build /out/ivideo-server .
 EXPOSE 3001
 ENTRYPOINT ["/app/ivideo-server"]

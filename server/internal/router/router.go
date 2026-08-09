@@ -16,6 +16,7 @@ func Register(r *gin.Engine, h *handlers.Handler) {
 	api := r.Group(handlers.APIPrefix)
 
 	api.GET("/health", h.Health)
+	api.GET("/logs/ws", h.StreamLogs)
 
 	registerMedia(api, h)     // OpenList / Jellyfin 直读源
 	registerResources(api, h) // 资源库 + 分享浏览/转存 + 点播

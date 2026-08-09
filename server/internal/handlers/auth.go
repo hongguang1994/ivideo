@@ -22,14 +22,25 @@ func (h *Handler) Providers(c *gin.Context) {
 	}
 	out := make([]gin.H, 0, len(defs))
 	for _, d := range defs {
-		cr, found, _ := h.store.GetCredential(d.provider)
-		out = append(out, gin.H{
+		credentialProvider := d.provider
+		if d.provider == "115" {
+			credentialProvider = "115_cookie"
+		} else if d.provider == "quark" {
+			credentialProvider = "quark_cookie"
+		}
+		cr, found, _ := h.store.GetCredential(credentialProvider)
+		item := gin.H{
 			"provider":   d.provider,
 			"name":       d.name,
 			"authMethod": d.method,
 			"authorized": found && cr.Token != "",
+			"extra":      cr.Extra,
 			"updatedAt":  cr.UpdatedAt, // 上次授权/更新时间(unix,0=从未)
-		})
+		}
+		if diagnostic, ok := h.cache.Diagnostic(d.provider); ok {
+			item["diagnostic"] = diagnostic
+		}
+		out = append(out, item)
 	}
 	resp.OK(c, gin.H{"providers": out})
 }
@@ -45,12 +56,16 @@ func (h *Handler) CheckProvider(c *gin.Context) {
 		resp.Fail(c, http.StatusBadRequest, "缺少 provider")
 		return
 	}
-	if err := h.cache.VerifyProvider(req.Provider); err != nil {
-		// 校验失败不是接口错误,而是"令牌无效"的正常结果。
-		resp.OK(c, gin.H{"healthy": false, "message": err.Error()})
-		return
-	}
-	resp.OK(c, gin.H{"healthy": true, "message": "有效"})
+	result := h.cache.DiagnoseProvider(req.Provider)
+	resp.OK(c, gin.H{
+		"healthy":     result.TokenHealthy,
+		"playable":    result.Playable,
+		"speedMbps":   result.SpeedMbps,
+		"sampleBytes": result.SampleBytes,
+		"durationMs":  result.DurationMS,
+		"checkedAt":   result.CheckedAt,
+		"message":     result.Message,
+	})
 }
 
 // SaveToken 保存某网盘的凭据(目前用于阿里开放接口 refresh token / 将来 115、夸克 cookie)。
@@ -79,6 +94,7 @@ func (h *Handler) SaveToken(c *gin.Context) {
 		resp.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	go h.cache.DiagnoseProvider(req.Provider)
 	resp.OK(c, gin.H{"ok": true})
 }
 
@@ -88,7 +104,7 @@ func (h *Handler) SaveToken(c *gin.Context) {
 func (h *Handler) AliyunOpenQR(c *gin.Context) {
 	if h.cfg.AliyunOpenClientID == "" || h.cfg.AliyunOpenClientSecret == "" {
 		resp.Fail(c, http.StatusBadRequest,
-			"未配置阿里开放平台 client_id/client_secret，无法自助扫码。请在配置里填入自己的应用凭据；或用 api.oplist.org 取到令牌后粘贴到下面。")
+			"未配置阿里开放平台 client_id/client_secret，无法自助扫码。请在配置里填入自己的应用凭据；或用 api.oplist.org.cn 取到令牌后粘贴到下面。")
 		return
 	}
 	sess, err := aliauth.OpenGenerate(c.Request.Context(), h.cfg.AliyunOpenBase,
@@ -126,6 +142,7 @@ func (h *Handler) AliyunOpenQRStatus(c *gin.Context) {
 			resp.Fail(c, http.StatusInternalServerError, "保存令牌失败: "+err.Error())
 			return
 		}
+		go h.cache.DiagnoseProvider("aliyun_open")
 	}
 	resp.OK(c, gin.H{"status": status})
 }
@@ -162,6 +179,7 @@ func (h *Handler) AliyunQRStatus(c *gin.Context) {
 			resp.Fail(c, http.StatusInternalServerError, "保存 token 失败: "+err.Error())
 			return
 		}
+		go h.cache.DiagnoseProvider("aliyun")
 	}
 	resp.OK(c, gin.H{"status": res.Status})
 }

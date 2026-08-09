@@ -1,148 +1,106 @@
-# ivideo · 网盘视频平台
+# ivideo
 
-以 **OpenList 挂载网盘** 为片源的点播/流媒体站,并可选接入 **Jellyfin** 提供刮削后的电影/剧集(海报、简介、分类)。前端 React,后端 Go + Gin,整套用 Docker Compose 部署,适合内网服务器。
+ivideo 是一个面向内网自用场景的网盘媒体工作台。它从公开分享源发现资源，将阿里云盘、115 和夸克分享整理进统一资源库，按需转存并通过后端代理播放，同时生成 Jellyfin 可扫描的 STRM、NFO 和图片。
 
-## 架构
+## 当前能力
 
-```
-                            ┌───────── Docker Compose ─────────┐
-  网盘 ──► OpenList(5244) ──┤                                   │
-              │            │  strm 生成器 ──► Jellyfin(8096)    │
-              │            │   (外部工具)      刮削/海报/转码     │
-              │            │                     │              │
-  浏览器 ─► nginx ─► Go/Gin backend ──┬── OpenList 源(裸文件浏览) │
-                                       └── Jellyfin 源(刮削片库)  │
-                            └───────────────────────────────────┘
-```
+- 多来源资源发现：本地目录、GitHub 公开仓库适配器、Telegram 公开频道。
+- 分享库管理：收藏、批量录入、目录浏览、有效性检测和定时检查。
+- 三网盘适配：阿里云盘、115、夸克的授权、分享浏览、转存和播放。
+- 按需缓存：播放时转存，支持 LRU、容量、闲置时间和 Jellyfin 会话感知清理。
+- 媒体整理：路径语义分析、候选标题、TMDb/豆瓣匹配、内容证据复核和人工确认。
+- Jellyfin 集成：初始化、媒体库创建、STRM/NFO/图片发布、扫描与图片刷新。
+- 可观测性：后端结构化日志通过 WebSocket 实时显示在设置页。
 
-- **OpenList**:挂载网盘,提供文件列表和直链。管理员在其 Web UI(`:5244`)配置网盘。
-- **Jellyfin(可选)**:独立媒体服务器,负责刮削元数据、海报、转码。媒体库指向 `./data/media`,由外部 strm 生成器把网盘内容转成 `.strm` 直链文件放入。
-- **server(Go/Gin)**:聚合两路源到 `/api/videos`(`?source=openlist|jellyfin`);播放/海报统一**代理转发**(隐藏真实地址、支持 Range 进度拖动)。未配置 `JELLYFIN_API_KEY` 时自动只提供 OpenList 源。
-- **web(React + nginx)**:唯一对外入口,`/` 出前端,`/api` 反代后端。首页按来源切换标签。
+## 系统组成
 
-## 目录结构
+| 服务 | 职责 | 默认端口 |
+| --- | --- | --- |
+| `web` | React 前端与 nginx API 网关 | `8090` |
+| `server` | Go/Gin 业务服务、代理、任务编排 | 仅容器内 `3001` |
+| `mysql` | 正式业务数据库，也暴露给局域网数据库工具 | `3306` |
+| `jellyfin` | 媒体库、客户端播放与转码 | `8097` |
+| `openlist` | 网盘挂载和兼容直读能力 | `5244` |
 
-```
-ivideo/
-├── docker-compose.yml
-├── .env.example
-├── server/          # Go + Gin 后端
-│   ├── main.go
-│   └── internal/{config,openlist,handlers,router.go}
-└── web/             # React 前端
-    ├── nginx.conf
-    └── src/{pages,components,api.ts,App.tsx}
-```
+核心代码按业务模块拆分，模块只依赖窄接口，由 `internal/app` 统一装配。详细说明见 [架构文档](docs/architecture.md) 和 [媒体整理流程](docs/media-pipeline.md)。
 
-## 部署(内网服务器)
+## 快速部署
 
-前置:服务器已装 Docker 与 Docker Compose。
+要求服务器已安装 Docker 与 Docker Compose。
 
 ```bash
-# 1. 拷贝项目到服务器,进入目录
-cd ivideo
-
-# 2. 准备环境变量
 cp .env.example .env
+mkdir -p data/server
+cp server/configs/conf.example.yaml data/server/conf.yaml
+```
 
-# 3. 先只启动 OpenList,拿初始管理员密码
-docker compose up -d openlist
-docker compose logs openlist | grep -i password
+1. 修改 `.env` 中的 MySQL 密码和 `DB_DSN`。
+2. 修改 `data/server/conf.yaml` 中的 `site_url`。它必须是 Jellyfin 容器能够访问的 ivideo 地址，例如 `http://192.168.50.140:8090`。
+3. 启动服务：
 
-# 4. 浏览器打开 http://<服务器IP>:5244
-#    用 admin + 上一步的密码登录,添加网盘存储(阿里云盘/OneDrive/WebDAV 等)
-#    记下视频所在目录路径,例如 /aliyun/videos
-
-# 5. 把凭据和视频目录填进 .env
-#    OPENLIST_PASSWORD=你的密码
-#    OPENLIST_ROOT=/aliyun/videos
-
-# 6. 起全部服务
+```bash
 docker compose up -d --build
-
-# 7. 访问站点
-#    http://<服务器IP>:8080
 ```
 
-## 端口
+4. 打开 `http://<服务器IP>:8090`，在右上角设置中心完成网盘、Jellyfin、TMDb 和 GitHub 授权。
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| web | 8090 | 视频站入口(对外)。8080 被 qBittorrent 占用,改用 8090 |
-| openlist | 5244 | OpenList 管理后台(配置网盘用) |
-| jellyfin | 8097 | Jellyfin 后台。8096 被现有 Jellyfin 占用,改用 8097 |
-| server | 3001 | 后端,仅容器内部访问 |
-
-## 后端 API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/health` | 健康检查,返回启用的来源列表 |
-| GET | `/api/videos?source=openlist&path=/` | 列出网盘目录下的子目录与视频 |
-| GET | `/api/videos?source=jellyfin` | 列出 Jellyfin 片库影片(带海报/简介) |
-| GET | `/api/stream?source=openlist&path=...` | 代理网盘直链播放(支持 Range) |
-| GET | `/api/stream?source=jellyfin&id=...` | 代理 Jellyfin 播放流(支持 Range) |
-| GET | `/api/image?source=jellyfin&id=...` | 代理 Jellyfin 海报图 |
-| GET | `/api/resources` | 资源目录(收集来的分享链接) |
-| POST | `/api/resources` | 新增一条资源 |
-| GET | `/api/play?resource=<id>` | 触发/查询转存,就绪返回 streamUrl |
-| GET | `/api/stream?source=cache&resource=<id>` | 播放已转存进自己网盘的资源(支持 Range) |
-
-## 按需转存缓存(核心)
-
-把「自己的网盘」当成缓存/中转,而非仓库:
-
-```
-资源目录(分享链接) ──点播──► 缓存管理器
-                              ├─ 已缓存? → 给自己盘直链播放
-                              └─ 未缓存 → 后台转存进自己盘(同源转存≈秒传) → 就绪后播放
-                                                    │
-                          定时清理:LRU + 配额上限 淘汰旧缓存 + 清回收站
-```
-
-- **一切播放都从自己网盘出**,源分享盘只被转存那一下碰,播放带宽全走自己账号。
-- **同源转存**(源与缓存盘同一家网盘)是服务器内部元数据复制,近乎瞬时。
-- 状态机:`uncached → transferring → ready → cleaned`;点播非阻塞,前端轮询 `/api/play` 直到 `ready`。
-- **适配器**:`CacheBackend` 接口,每个网盘一套实现。
-  - `fake`:本地联调用,用公开示例视频跑通整条链路(默认)。
-  - `aliyun`:阿里云盘,**当前为 stub**。落地需非官方网页 API(Go 库 [tickstep/aliyunpan-api](https://github.com/tickstep/aliyunpan-api)),建议用**专用小号**隔离封号风险,`ALIYUN_REFRESH_TOKEN` 传入凭据。
-- 清理由 `CACHE_MAX_BYTES`(配额上限)和 `CACHE_TTL_HOURS`(闲置时长)控制。
-
-## 接入 Jellyfin(可选)
-
-1. `docker compose up -d jellyfin`,打开 `http://<服务器IP>:8096` 走首启向导。
-2. 用外部 strm 生成器(如 AutoFilm / alist-strm 类工具)扫描 OpenList,把 `.strm` 直链文件输出到 `./data/media`。
-3. 在 Jellyfin 后台新建媒体库,目录选 `/media`,完成刮削。
-4. 后台 → 控制台 → API 密钥,生成一个密钥,填入 `.env` 的 `JELLYFIN_API_KEY`。
-5. `docker compose up -d server`(重建/重启后端),前端首页即出现「Jellyfin 影库」标签。
-
-> 未填 `JELLYFIN_API_KEY` 时后端只提供网盘源,前端不显示 Jellyfin 标签,一切照常。
+运行参数、升级和排障步骤见 [部署与运维](docs/operations.md)。
 
 ## 本地开发
 
-```bash
-# 后端(需先有一个可访问的 OpenList,或改 OPENLIST_BASE_URL 指向它)
-cd server
-OPENLIST_BASE_URL=http://<openlist地址>:5244 OPENLIST_PASSWORD=xxx go run .
+后端测试默认使用 SQLite，不依赖正式 MySQL：
 
-# 前端(另开终端,/api 已代理到 localhost:3001)
+```bash
+cd server
+go test ./...
+
+DB_DRIVER=sqlite \
+DB_PATH=./ivideo.dev.db \
+SITE_URL=http://localhost:5173 \
+go run .
+```
+
+前端：
+
+```bash
 cd web
 npm install
-npm run dev   # http://localhost:5173
+npm run dev
 ```
 
-## Roadmap
+生产构建检查：
 
-**进行中 / 已搭骨架**
-- [x] 按需转存缓存:SQLite 数据层 + `CacheBackend` 接口 + 缓存管理器 + LRU/配额清理(fake 适配器已跑通)
-- [ ] **阿里云盘适配器**(把 stub 换成真实转存,基于 tickstep/aliyunpan-api + 专用小号)
-- [ ] 前端:资源目录页 + 点播轮询「转存中→就绪」交互
-
-**后续**
-- 其它缓存盘适配器(115 / 夸克 / PikPak)
-- strm 生成并入后端(定时扫描 → 生成 strm,免外部工具)
-- Jellyfin 剧集(Series/Season/Episode)分季分集浏览
-- 用户登录 / 权限(与 Jellyfin 用户体系映射)
-- 播放量、历史记录、收藏
-- 评论 / 弹幕 / 搜索
+```bash
+cd server && go vet ./... && go test ./...
+cd ../web && npm run build
 ```
+
+## 数据与媒体目录
+
+运行数据不会提交到 Git：
+
+```text
+data/mysql/             MySQL 数据
+data/server/            后端配置及本地状态
+data/media/movies/      电影 STRM、NFO、海报
+data/media/tv/          剧集 STRM、NFO、图片
+data/media/anime/       动漫 STRM、NFO、图片
+data/media/variety/     综艺 STRM、NFO、图片
+data/media/review/      待整理资源
+data/jellyfin/config/   Jellyfin 数据库与配置
+data/jellyfin/cache/    Jellyfin 缓存和刮削缓存
+```
+
+## 注意事项
+
+- 当前项目定位为可信内网自用，业务 API 尚未增加独立登录鉴权，不应直接暴露到公网。
+- 网盘和第三方服务令牌保存在数据库中；`.env`、`data/` 和本地配置已加入 `.gitignore`。
+- STRM 发布是全量但幂等的：输入未变化时不会重写文件或触发 Jellyfin 扫库。
+- 媒体匹配置信度不足时会进入“待整理”，不会强行套用可能错误的在线元数据。
+
+## 文档
+
+- [架构与模块边界](docs/architecture.md)
+- [媒体识别、匹配和发布流程](docs/media-pipeline.md)
+- [配置、部署和运维](docs/operations.md)
+- [HTTP API](docs/api.md)

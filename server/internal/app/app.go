@@ -20,10 +20,15 @@ import (
 func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	ol := openlist.New(cfg.OpenListBaseURL, cfg.OpenListUsername, cfg.OpenListPassword)
 
+	// Jellyfin 专用 Key 优先从数据库读取，首次初始化后无需把密钥写进配置文件。
+	jellyfinKey := cfg.JellyfinAPIKey
+	if saved, found, err := st.GetCredential("jellyfin_api"); err == nil && found && saved.Token != "" {
+		jellyfinKey = saved.Token
+	}
 	// 仅在配置了 API Key 时启用 Jellyfin。
 	var jf *jellyfin.Client
-	if cfg.JellyfinEnabled() {
-		jf = jellyfin.New(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey)
+	if cfg.JellyfinBaseURL != "" && jellyfinKey != "" {
+		jf = jellyfin.New(cfg.JellyfinBaseURL, jellyfinKey)
 		slog.Info("已启用 Jellyfin 源", "baseURL", cfg.JellyfinBaseURL)
 	} else {
 		slog.Info("未配置 Jellyfin，仅提供 OpenList 源")
@@ -43,13 +48,35 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	cm.SetOriginalMaxMbps(cfg.OriginalMaxMbps)
 	// 令牌保活：定时预热令牌，避免闲置失效 + 第一次播放不用等刷新。
 	cm.StartTokenRefresh(cfg.TokenRefreshMin)
+	cm.StartProviderDiagnostics()
 	cm.StartCleanup(cfg.CacheCleanInterval, cfg.CacheTTLHours, cfg.CacheMaxBytes, cfg.CacheStopGrace)
 	slog.Info("缓存盘适配器已就绪", "backend", backend.Name())
 
-	h := handlers.New(cfg, ol, jf, st, cm)
+	importService, metadataService, workflowService := buildMediaModules(cfg, st, cm, jf)
+	discovery := buildDiscovery(cfg, st, metadataService)
+	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery)
 
 	// strm 媒体库自动维护：启动时生成一次 + 定时兜底（导入完成后也会即时触发）。
 	h.StartAutoStrm(cfg.StrmAutoInterval)
+	h.StartShareChecks(cfg.ShareCheckInterval)
+	h.StartImportScheduler()
+	if jf != nil {
+		if err := jf.EnsureLibraries(cfg.MediaDir); err != nil {
+			slog.Warn("确保 Jellyfin 媒体库失败", "err", err)
+		} else if err := jf.RefreshLibrary(); err != nil {
+			slog.Warn("首次扫描 Jellyfin 媒体库失败", "err", err)
+		} else {
+			slog.Info("Jellyfin 媒体库已就绪")
+		}
+		if removed, err := jf.RemoveMissingItems(cfg.MediaDir); err != nil {
+			slog.Warn("清理 Jellyfin 旧索引失败", "err", err)
+		} else if removed > 0 {
+			slog.Info("已清理 Jellyfin 旧索引", "removed", removed)
+			if err := jf.RefreshLibrary(); err != nil {
+				slog.Warn("清理旧索引后重新扫描失败", "err", err)
+			}
+		}
+	}
 
 	// 用 gin.New()（而非 gin.Default()），中间件栈由 router 显式装配，避免重复。
 	r := gin.New()
@@ -57,8 +84,8 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	return r, nil
 }
 
-// tokenStore 把 store.Store 适配成 backends.TokenStore（读写网盘 token）。
-type tokenStore struct{ st store.Store }
+// tokenStore 把凭据仓储适配成 backends.TokenStore（读写网盘 token）。
+type tokenStore struct{ st store.CredentialRepository }
 
 func (t tokenStore) GetToken(provider string) string {
 	cr, _, err := t.st.GetCredential(provider)

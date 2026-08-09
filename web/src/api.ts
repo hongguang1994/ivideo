@@ -157,7 +157,20 @@ export interface Provider {
   name: string;
   authMethod: "qrcode" | "cookie" | "token";
   authorized: boolean;
+  extra?: string;
   updatedAt: number; // 上次授权/更新时间(unix 秒,0=从未)
+  diagnostic?: ProviderDiagnostic;
+}
+
+export interface ProviderDiagnostic {
+  provider: string;
+  tokenHealthy: boolean;
+  playable: boolean;
+  speedMbps: number;
+  sampleBytes: number;
+  durationMs: number;
+  checkedAt: number;
+  message: string;
 }
 
 export async function getProviders(): Promise<Provider[]> {
@@ -167,6 +180,11 @@ export async function getProviders(): Promise<Provider[]> {
 
 export interface HealthResult {
   healthy: boolean;
+  playable: boolean;
+  speedMbps: number;
+  sampleBytes: number;
+  durationMs: number;
+  checkedAt: number;
   message: string;
 }
 
@@ -226,6 +244,169 @@ export function addShare(s: Partial<Share>): Promise<Share> {
   return post<Share>("/shares", s);
 }
 
+export interface BatchShareInput {
+  provider: string;
+  shareUrl: string;
+  sharePwd?: string;
+  title?: string;
+  category?: string;
+}
+
+export interface BatchShareResult {
+  index: number;
+  id?: number;
+  provider: string;
+  shareUrl: string;
+  status: "added" | "duplicate" | "failed";
+  message?: string;
+}
+
+export interface BatchShareResponse {
+  added: number;
+  duplicates: number;
+  failed: number;
+  results: BatchShareResult[];
+}
+
+export function addSharesBatch(items: BatchShareInput[]): Promise<BatchShareResponse> {
+  return post<BatchShareResponse>("/shares/batch", { items });
+}
+
+export interface GitHubResourceSyncResponse {
+  discovered: number;
+  added: number;
+  existing: number;
+}
+
+export function syncGitHubResources(): Promise<GitHubResourceSyncResponse> {
+  return post<GitHubResourceSyncResponse>("/search/github/resources/sync");
+}
+
+export interface ShareCheckResponse {
+	started?: boolean;
+	message?: string;
+	checked?: number;
+	valid?: number;
+	invalid?: number;
+}
+
+export function checkAllShares(): Promise<ShareCheckResponse> {
+  return post<ShareCheckResponse>("/shares/check");
+}
+
+export function checkShare(id: number): Promise<{ status: string; message?: string }> {
+  return post<{ status: string; message?: string }>(`/shares/${id}/check`);
+}
+
+export interface SearchResource {
+  provider: string;
+  shareUrl: string;
+  sharePwd: string;
+  title: string;
+  resourceType?: string;
+  fileName?: string;
+  updatedAt?: string;
+  source: string;
+  sourceName?: string;
+  repository: string;
+  path: string;
+  sourceUrl: string;
+  score?: number;
+  sources?: string[];
+}
+
+export interface SearchSourceReport {
+  id: string;
+  name: string;
+  healthy: boolean;
+  resultCount: number;
+  scanned: number;
+  durationMs: number;
+  error?: string;
+}
+
+export interface SearchMeta {
+  source: string;
+  scanned: number;
+  remaining: number;
+  resetAt: number;
+  durationMs?: number;
+  cached?: boolean;
+  sources?: SearchSourceReport[];
+  warnings?: string[];
+}
+
+export interface SearchResponse {
+  items: SearchResource[];
+  meta: SearchMeta;
+  jobId?: string;
+  query?: string;
+  pending?: boolean;
+}
+
+export function searchResources(query: string): Promise<SearchResponse> {
+  return apiFetch<SearchResponse>(`/search/resources?q=${encodeURIComponent(query)}`);
+}
+
+export interface GitHubResourceSource {
+  id: string;
+  name: string;
+  repository: string;
+  url: string;
+  parser: string;
+  description: string;
+  configured: boolean;
+}
+
+export function getGitHubSources(): Promise<{ items: GitHubResourceSource[] }> {
+  return apiFetch<{ items: GitHubResourceSource[] }>("/search/github/sources");
+}
+
+export interface GitHubResourceListResponse {
+  items: SearchResource[];
+  total: number;
+  page: number;
+  pageSize: number;
+  meta: SearchMeta;
+}
+
+export function getGitHubResources(page = 1, pageSize = 50): Promise<GitHubResourceListResponse> {
+  return apiFetch<GitHubResourceListResponse>(`/search/github/resources?page=${page}&pageSize=${pageSize}`);
+}
+
+export interface SearchSettingsStatus {
+  githubConfigured: boolean;
+  updatedAt: number;
+  engine?: {
+    name: string;
+    cacheMinutes: number;
+    maxResults: number;
+    sources: Array<{
+      id: string;
+      name: string;
+      priority: number;
+      lastHealthy: boolean;
+      lastError?: string;
+      lastDurationMs: number;
+      successCount: number;
+      failureCount: number;
+      lastCheckedAt: number;
+    }>;
+  };
+}
+
+export function getSearchSettings(): Promise<SearchSettingsStatus> {
+  return apiFetch<SearchSettingsStatus>("/settings/search");
+}
+
+export function saveGitHubToken(token: string): Promise<SearchSettingsStatus> {
+  return post<SearchSettingsStatus>("/settings/search/github", { token });
+}
+
+export function deleteGitHubToken(): Promise<SearchSettingsStatus> {
+  return apiFetch<SearchSettingsStatus>("/settings/search/github", { method: "DELETE" });
+}
+
 export function updateShare(id: number, s: Partial<Share>): Promise<unknown> {
   return apiFetch(`/shares/${id}`, {
     method: "PUT",
@@ -254,9 +435,159 @@ export function importShare(
   return post<ImportResult>("/resources/import", { shareUrl, sharePwd, provider, path });
 }
 
+export interface ImportSchedule {
+  enabled: boolean;
+  intervalMinutes: number;
+}
+
+export interface ImportTaskStatus {
+  running: boolean;
+  total: number;
+  processed: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  current: string;
+  lastError: string;
+  startedAt: number;
+  finishedAt: number;
+}
+
+export interface ImportSettingsStatus {
+  schedule: ImportSchedule;
+  status: ImportTaskStatus;
+}
+
+export function getImportSettings(): Promise<ImportSettingsStatus> {
+  return apiFetch<ImportSettingsStatus>("/settings/import");
+}
+
+export function saveImportSettings(schedule: ImportSchedule): Promise<ImportSettingsStatus> {
+  return apiFetch<ImportSettingsStatus>("/settings/import", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(schedule),
+  });
+}
+
+export function runImportTask(): Promise<{ started: boolean; status: ImportTaskStatus }> {
+  return post<{ started: boolean; status: ImportTaskStatus }>("/imports/run");
+}
+
 // 保存某网盘凭据(阿里开放接口 refresh token / 115、夸克 cookie)。
 export function saveProviderToken(provider: string, token: string, extra?: string): Promise<unknown> {
   return post("/settings/token", { provider, token, extra });
+}
+
+export interface JellyfinSetupStatus {
+  ready: boolean;
+  firstUser: string;
+  connected: boolean;
+  canInitialize: boolean;
+  baseUrl: string;
+}
+
+export interface JellyfinBootstrapResult {
+  username: string;
+  password: string;
+  baseUrl: string;
+}
+
+export function getJellyfinSetup(): Promise<JellyfinSetupStatus> {
+  return apiFetch<JellyfinSetupStatus>("/settings/jellyfin");
+}
+
+export function initializeJellyfin(): Promise<JellyfinBootstrapResult> {
+  return post<JellyfinBootstrapResult>("/settings/jellyfin/initialize");
+}
+
+export interface MetadataStatus {
+  configured: boolean;
+  running: boolean;
+	startedAt?: number;
+	finishedAt?: number;
+	lastResult?: MetadataResult;
+	lastError?: string;
+}
+
+export interface MetadataResult {
+  items: number;
+  episodes: number;
+  images: number;
+  skipped: number;
+  errors?: string[];
+}
+
+export function getMetadataStatus(): Promise<MetadataStatus> {
+  return apiFetch<MetadataStatus>("/settings/metadata");
+}
+
+export function saveMetadataToken(token: string): Promise<MetadataStatus> {
+  return post<MetadataStatus>("/settings/metadata/token", { token });
+}
+
+export function scrapeMetadata(): Promise<MetadataStatus> {
+	return post<MetadataStatus>("/metadata/scrape");
+}
+
+export interface MediaGroup {
+  id: number;
+  rawTitle: string;
+  normalizedTitle: string;
+  mediaKind: string;
+  suggestedLibrary: string;
+  year: number;
+  status: string;
+  decisionSource: string;
+  selectedSource: string;
+  selectedId: string;
+  canonicalTitle: string;
+  confidence: number;
+  reason: string;
+  updatedAt: number;
+}
+
+export interface MediaGroupMember {
+  resourceId: number;
+  season: number;
+  episode: number;
+  confidence: number;
+  resource: { id: number; title: string; filePath: string; provider: string };
+}
+
+export interface MediaCandidate {
+  id: number;
+  source: string;
+  providerId: string;
+  title: string;
+  originalTitle: string;
+  year: number;
+  mediaKind: string;
+  library: string;
+  score: number;
+  evidenceJson: string;
+}
+
+export interface MediaGroupDetail {
+  group: MediaGroup;
+  members: MediaGroupMember[];
+  candidates: MediaCandidate[];
+}
+
+export function getMediaGroups(status = "review", limit = 100, offset = 0): Promise<{ items: MediaGroupDetail[]; total: number }> {
+  return apiFetch<{ items: MediaGroupDetail[]; total: number }>(`/media-groups?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`);
+}
+
+export function confirmMediaGroup(groupId: number, candidateId: number, library: string): Promise<{ confirmed: boolean; members: number }> {
+  return post(`/media-groups/${groupId}/confirm`, { candidateId, library });
+}
+
+export function reviewMediaGroup(groupId: number): Promise<{ review: boolean }> {
+  return post(`/media-groups/${groupId}/review`);
+}
+
+export function searchMediaGroupCandidates(groupId: number, query: string): Promise<MediaGroupDetail> {
+  return post(`/media-groups/${groupId}/candidates`, { query });
 }
 
 export interface QRSession {

@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { addShare, deleteShare, getShares, importShare, type Share } from "../api";
+import { ListPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import {
+  addShare,
+  addSharesBatch,
+  deleteShare,
+  getShares,
+  checkAllShares,
+  importShare,
+  type BatchShareResponse,
+  type Share,
+} from "../api";
+import { detectShareProvider, parseShareBatch, validateShareDraft, type ShareDraft } from "../shareBatch";
+import { getSharePreferences } from "../sharePreferences";
 
 const PROVIDERS = [
   { value: "aliyun", label: "阿里云盘" },
@@ -12,6 +24,7 @@ const PROVIDERS = [
 const PROVIDER_LABEL: Record<string, string> = Object.fromEntries(
   PROVIDERS.map((p) => [p.value, p.label])
 );
+const BATCH_PROVIDERS = PROVIDERS.filter((p) => ["aliyun", "115", "quark"].includes(p.value));
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   valid: { label: "有效", cls: "badge-ok" },
@@ -31,16 +44,24 @@ function fmtSize(bytes: number): string {
   return n.toFixed(i > 0 && n < 10 ? 1 : 0) + " " + u[i];
 }
 
-const emptyForm = { provider: "aliyun", shareUrl: "", sharePwd: "", title: "", category: "" };
+const emptyForm = () => {
+  const preferences = getSharePreferences();
+  return { provider: preferences.defaultProvider, shareUrl: "", sharePwd: "", title: "", category: preferences.defaultCategory };
+};
 
 export default function Shares() {
   const [items, setItems] = useState<Share[]>([]);
   const [error, setError] = useState("");
-  const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ ...emptyForm });
+  const [editor, setEditor] = useState<"single" | "batch" | null>(null);
+  const [form, setForm] = useState(emptyForm);
   const [busy, setBusy] = useState(false);
+  const [batchText, setBatchText] = useState("");
+  const [batchCategory, setBatchCategory] = useState(() => getSharePreferences().defaultCategory);
+  const [drafts, setDrafts] = useState<ShareDraft[]>([]);
+  const [batchResult, setBatchResult] = useState<BatchShareResponse | null>(null);
   const [importing, setImporting] = useState<number | null>(null);
   const [msg, setMsg] = useState("");
+  const [checking, setChecking] = useState(false);
   const navigate = useNavigate();
 
   const doImport = async (s: Share) => {
@@ -71,8 +92,8 @@ export default function Shares() {
     setBusy(true);
     try {
       await addShare(form);
-      setForm({ ...emptyForm });
-      setShow(false);
+      setForm(emptyForm());
+      setEditor(null);
       load();
     } catch (e) {
       setError(String((e as Error).message || e));
@@ -81,14 +102,86 @@ export default function Shares() {
     }
   };
 
+  const parseBatch = () => {
+    setError("");
+    setBatchResult(null);
+    const parsed = parseShareBatch(batchText, batchCategory.trim());
+    if (parsed.length === 0) {
+      setError("请先粘贴至少一条分享链接");
+      return;
+    }
+    setDrafts(parsed);
+  };
+
+  const updateDraft = (index: number, patch: Partial<ShareDraft>) => {
+    setDrafts((current) =>
+      current.map((draft, i) => {
+        if (i !== index) return draft;
+        const next = { ...draft, ...patch };
+        if (patch.shareUrl !== undefined) next.provider = detectShareProvider(next.shareUrl) || next.provider;
+        next.error = validateShareDraft(next);
+        return next;
+      })
+    );
+  };
+
+  const submitBatch = async () => {
+    const invalid = drafts.find((draft) => draft.error);
+    if (invalid) {
+      setError("请先修正或删除标红的条目");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setBatchResult(null);
+    try {
+      const result = await addSharesBatch(
+        drafts.map(({ provider, shareUrl, sharePwd, title, category }) => ({
+          provider,
+          shareUrl: shareUrl.trim(),
+          sharePwd: sharePwd.trim(),
+          title: title.trim(),
+          category: category.trim(),
+        }))
+      );
+      setBatchResult(result);
+      await load();
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeEditor = () => {
+    setEditor(null);
+    setBatchText("");
+    setDrafts([]);
+    setBatchResult(null);
+  };
+
   const remove = async (id: number) => {
-    if (!window.confirm("删除这个收藏的分享？")) return;
+    if (getSharePreferences().confirmDelete && !window.confirm("删除这个收藏的分享？")) return;
     setError("");
     try {
       await deleteShare(id);
       load();
     } catch (e) {
       setError(String((e as Error).message || e));
+    }
+  };
+
+  const checkAll = async () => {
+    setChecking(true);
+    setError("");
+    setMsg("");
+    try {
+      const result = await checkAllShares();
+      setMsg(result.message || "检查已在后台开始，请稍后刷新分享库查看状态。");
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -99,9 +192,17 @@ export default function Shares() {
           <h1>分享库</h1>
           <p>收藏各网盘的分享链接，随时浏览、转存。分享会失效，可跟踪有效性。</p>
         </div>
-        <button className="primary" onClick={() => setShow((s) => !s)}>
-          {show ? "取消" : "+ 收藏分享"}
-        </button>
+        <div className="share-actions">
+          <button onClick={() => (editor === "single" ? closeEditor() : setEditor("single"))}>
+            <Plus size={17} /> 收藏分享
+          </button>
+          <button className="primary" onClick={() => (editor === "batch" ? closeEditor() : setEditor("batch"))}>
+            <ListPlus size={17} /> 批量收藏
+          </button>
+          <button onClick={checkAll} disabled={checking || items.length === 0}>
+            <RefreshCw size={17} /> {checking ? "检查中…" : "检查可用性"}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -121,7 +222,7 @@ export default function Shares() {
         </div>
       )}
 
-      {show && (
+      {editor === "single" && (
         <div className="add-form">
           <select
             value={form.provider}
@@ -162,6 +263,90 @@ export default function Shares() {
             {busy ? "收藏中…" : "收藏"}
           </button>
         </div>
+      )}
+
+      {editor === "batch" && (
+        <section className="batch-share-panel">
+          <div className="batch-share-heading">
+            <div>
+              <h2>批量收藏</h2>
+              <p>每行一条，支持直接粘贴包含名称、链接和提取码的分享文本。</p>
+            </div>
+            <button className="icon-button" title="关闭" aria-label="关闭批量收藏" onClick={closeEditor}>
+              <X size={19} />
+            </button>
+          </div>
+
+          {drafts.length === 0 ? (
+            <div className="batch-share-paste">
+              <textarea
+                value={batchText}
+                onChange={(event) => setBatchText(event.target.value)}
+                placeholder={"示例：\n凡人修仙传 https://www.alipan.com/s/xxxx\nhttps://pan.quark.cn/s/xxxx 提取码：1234\nhttps://115.com/s/xxxx 8abc"}
+                autoFocus
+              />
+              <div className="batch-share-paste-actions">
+                <label>
+                  默认分类
+                  <input
+                    value={batchCategory}
+                    onChange={(event) => setBatchCategory(event.target.value)}
+                    placeholder="可选"
+                  />
+                </label>
+                <button className="primary" onClick={parseBatch} disabled={!batchText.trim()}>
+                  解析并预览
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="batch-share-toolbar">
+                <span>已识别 {drafts.length} 条</span>
+                <button onClick={() => setDrafts([])}>返回修改原文</button>
+              </div>
+              <div className="batch-share-table-wrap">
+                <div className="batch-share-row batch-share-row-head" aria-hidden="true">
+                  <span>网盘</span><span>分享链接</span><span>提取码</span><span>名称</span><span>分类</span><span />
+                </div>
+                {drafts.map((draft, index) => (
+                  <div className={`batch-share-row${draft.error ? " has-error" : ""}`} key={draft.key}>
+                    <select value={draft.provider} onChange={(event) => updateDraft(index, { provider: event.target.value as ShareDraft["provider"] })}>
+                      <option value="">请选择</option>
+                      {BATCH_PROVIDERS.map((provider) => <option key={provider.value} value={provider.value}>{provider.label}</option>)}
+                    </select>
+                    <input value={draft.shareUrl} onChange={(event) => updateDraft(index, { shareUrl: event.target.value })} placeholder="分享链接" />
+                    <input value={draft.sharePwd} onChange={(event) => updateDraft(index, { sharePwd: event.target.value })} placeholder="可选" />
+                    <input value={draft.title} onChange={(event) => updateDraft(index, { title: event.target.value })} placeholder="可选" />
+                    <input value={draft.category} onChange={(event) => updateDraft(index, { category: event.target.value })} placeholder="可选" />
+                    <button className="icon-button" title="删除此条" aria-label="删除此条" onClick={() => setDrafts((current) => current.filter((_, i) => i !== index))}>
+                      <Trash2 size={17} />
+                    </button>
+                    {draft.error && <div className="batch-share-error">{draft.error}</div>}
+                  </div>
+                ))}
+              </div>
+              <div className="batch-share-submit">
+                <span className="muted">提交后会自动合并已经收藏的相同链接。</span>
+                <button className="primary" onClick={submitBatch} disabled={busy || drafts.length === 0 || drafts.some((draft) => Boolean(draft.error))}>
+                  {busy ? "收藏中…" : `收藏 ${drafts.length} 条`}
+                </button>
+              </div>
+            </>
+          )}
+
+          {batchResult && (
+            <div className="batch-share-result">
+              <strong>处理完成</strong>
+              <span>新增 {batchResult.added} 条</span>
+              <span>重复 {batchResult.duplicates} 条</span>
+              <span>失败 {batchResult.failed} 条</span>
+              {batchResult.failed > 0 && batchResult.results.filter((result) => result.status === "failed").map((result) => (
+                <div key={result.index}>{result.shareUrl || `第 ${result.index + 1} 条`}：{result.message}</div>
+              ))}
+            </div>
+          )}
+        </section>
       )}
 
       {items.length === 0 ? (
@@ -206,7 +391,7 @@ export default function Shares() {
                   <button
                     className="primary"
                     onClick={() =>
-                      navigate("/browse", {
+                      navigate("/settings/shares/browse", {
                         state: { shareUrl: s.shareUrl, sharePwd: s.sharePwd, provider: s.provider },
                       })
                     }

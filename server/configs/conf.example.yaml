@@ -6,30 +6,33 @@
 #   openlist.base_url  ⇄  OPENLIST_BASE_URL
 # 所以现有 docker 环境变量无需改动即可继续覆盖这里的值。
 #
-# 敏感凭据（阿里 token 等）不放这里 —— 它们通过设置页扫码存在数据库。
+# 网盘凭据通过设置页扫码存入数据库；MySQL DSN 建议通过 DB_DSN 环境变量注入。
 
 server:
   port: "3001"
 
-site_url: "http://localhost:8090"   # strm 里写的站点地址
+# Docker 内的 Jellyfin 不能访问 localhost:8090。请填局域网中 Jellyfin 可访问的地址，
+# 例如 http://192.168.50.140:8090；也可使用同一 Compose 网络内的 http://web。
+site_url: "http://web"
 media_dir: "/media"                 # strm 落地目录
 
-# 数据库:driver=sqlite(默认)用 db_path;driver=mysql 用 db.dsn。
+# 正式部署使用 MySQL。db.dsn 必填，优先通过 DB_DSN 环境变量注入，避免把密码写入文件。
+# SQLite 仅用于本地开发，需显式设 driver: sqlite 并填写 db_path。
 db:
-  driver: "sqlite"                  # sqlite / mysql
-  dsn: ""                           # mysql 专用,如 user:pass@tcp(mysql:3306)/ivideo?charset=utf8mb4
-db_path: "/data/ivideo.db"          # SQLite 文件(driver=sqlite 时用)
+  driver: "mysql"                   # mysql / sqlite(仅本地开发)
+  dsn: ""                           # 由 DB_DSN 覆盖；如 ivideo:密码@tcp(mysql:3306)/ivideo?charset=utf8mb4&parseTime=true&loc=Local
+db_path: "./ivideo.db"               # SQLite 本地开发文件
 
 # 自动选流:码率高于阈值的片源自动改走转码流(转码流不限速,实测 52 Mbps),
 # 低码率片源仍走原画。0 = 关闭,一律按 strm.mode 走。
 #
 # 阈值应设成「你的开放接口令牌能稳定跑到的速度」—— 阿里**按应用(client_id)限速**,
 # 同一台机器同一批文件实测:
-#   oplist·TV 版令牌     55~66 Mbps  → 阈值设 40,基本所有片都能走原画
+#   oplist·TV 版令牌     实测约 28 Mbps → 阈值设 20,给网络波动留出余量
 #   AList / oplist·OAuth2 约 4 Mbps  → 阈值设 3.5,只有低码率片能走原画
-# 默认按普通 OAuth2 保守取值;换上 TV 版令牌后记得调大。
+# 当前推荐 TV 版令牌；实际部署应根据设置页测速结果调整。
 stream:
-  original_max_mbps: 3.5
+  original_max_mbps: 20
 
 strm:
   mode: "hls"                       # hls(转码,流畅) / original(原画,需不限速账号)
@@ -61,6 +64,23 @@ cache:
   # 有单飞锁保证不会并发刷新把会轮换的 TV 令牌搞断。0=关闭。
   token_refresh_minutes: 30
 
+# 分享库可用性检查间隔。检查分享根目录并更新有效/失效状态，0=关闭。
+share_check_interval_minutes: 15
+
+# ivideo 独立资源发现引擎。各来源并行执行，单个来源失败不会中断整次搜索。
+discovery:
+  concurrency: 4
+  timeout_seconds: 18
+  quick_wait_seconds: 4
+  cache_minutes: 10
+  max_results: 200
+  # Telegram 公开频道无需登录；网络不可达时会在设置页标为异常。
+  telegram_channels:
+    - "tgsearchers3"
+    - "share_aliyun"
+    - "Quark_Movies"
+    - "Lsp115"
+
 # 分享导入(ImportShare):遍历分享把视频建成资源
 import:
   max_depth: 8      # 最大递归目录深度(太深的片会漏,大分享调大)
@@ -77,9 +97,9 @@ aliyun:
   #   alist  约 2~20 MB/s (16~158 Mbps)  ← 默认。够播蓝光原盘(12 Mbps)
   #   oplist 约 0.5 MB/s  (4 Mbps)       ← 只够播普通压制,蓝光必卡
   # 令牌来源:https://alistgo.com/tool/aliyundrive/request.html 扫码
-  # 注:oplist 的 alicloud_tv 通道服务端已损坏(返回"刷新Token失败"),只有 alicloud_qr 可用。
+  # 注:全球节点的 TV 通道可能返回 500，TV token 使用官方大陆节点续期。
   #     两家请求形态不同,换 url 时必须同步换 style。
-  #   oplist: url=https://api.oplist.org/alicloud/renewapi      style=oplist (GET)
+  #   oplist: url=https://api.oplist.org.cn/alicloud/renewapi   style=oplist (GET)
   #   alist : url=https://api.alistgo.com/alist/ali_open/token  style=alist  (POST JSON)
   open_renew_url: "https://api.alistgo.com/alist/ali_open/token"
   open_renew_style: "alist"

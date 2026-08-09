@@ -40,7 +40,12 @@ func printConfig(cfg config.Config) {
 	}
 	fmt.Println("配置校验通过 ✓  生效配置如下：")
 	fmt.Println("  server.port           =", cfg.Port)
-	fmt.Println("  db_path               =", cfg.DBPath)
+	fmt.Println("  db.driver             =", cfg.DBDriver)
+	if cfg.DBDriver == "mysql" {
+		fmt.Println("  db.dsn                =", mask(cfg.DBDSN))
+	} else {
+		fmt.Println("  db_path               =", cfg.DBPath)
+	}
 	fmt.Println("  site_url              =", cfg.SiteURL)
 	fmt.Println("  media_dir             =", cfg.MediaDir)
 	fmt.Println("  strm.mode             =", cfg.StrmMode)

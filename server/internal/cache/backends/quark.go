@@ -2,9 +2,7 @@ package backends
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -106,8 +104,24 @@ func (q *Quark) cookie() string {
 func (q *Quark) call(ctx context.Context, method, base, path string, query url.Values, payload any, out any) error {
 	ck := q.cookie()
 	if ck == "" {
-		return fmt.Errorf("未配置夸克 cookie，请在设置页扫码登录")
+		return fmt.Errorf("未配置夸克 cookie，转存或播放时请在设置页扫码登录")
 	}
+	return q.callWithHeaders(ctx, method, base, path, query, payload, out, map[string]string{
+		"User-Agent": QuarkUA,
+		"Cookie":     ck,
+		"Referer":    "https://pan.quark.cn/",
+	})
+}
+
+// shareCall 访问公开分享接口。浏览和导入只需要分享链接/提取码，不应要求个人 Cookie。
+func (q *Quark) shareCall(ctx context.Context, method, path string, query url.Values, payload any, out any) error {
+	return q.callWithHeaders(ctx, method, quarkShareBase, path, query, payload, out, map[string]string{
+		"User-Agent": QuarkUA,
+		"Referer":    "https://pan.quark.cn/",
+	})
+}
+
+func (q *Quark) callWithHeaders(ctx context.Context, method, base, path string, query url.Values, payload any, out any, headers map[string]string) error {
 	if query == nil {
 		query = url.Values{}
 	}
@@ -117,31 +131,23 @@ func (q *Quark) call(ctx context.Context, method, base, path string, query url.V
 	query.Set("uc_param_str", "")
 	query.Set("__t", fmt.Sprintf("%d", time.Now().UnixMilli()))
 
-	var body io.Reader
+	var body []byte
+	var ctype string
 	if payload != nil {
-		b, err := json.Marshal(payload)
+		b, ct, err := jsonBody(payload)
 		if err != nil {
 			return err
 		}
-		body = strings.NewReader(string(b))
+		body, ctype = b, ct
 	}
-	req, err := http.NewRequestWithContext(ctx, method, base+path+"?"+query.Encode(), body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", QuarkUA)
-	req.Header.Set("Cookie", ck)
-	req.Header.Set("Referer", "https://pan.quark.cn/")
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := q.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	return json.Unmarshal(raw, out)
+	return doHTTP(ctx, q.http, httpReq{
+		Method: method,
+		URL:    base + path + "?" + query.Encode(),
+		Headers: headers,
+		Body:  body,
+		CType: ctype,
+		Label: "夸克",
+	}, out)
 }
 
 // quarkShareItem 是分享内的一个条目。
@@ -162,7 +168,7 @@ func (q *Quark) shareToken(ctx context.Context, pwdID, passcode string) (string,
 			Stoken string `json:"stoken"`
 		} `json:"data"`
 	}
-	err := q.call(ctx, http.MethodPost, quarkShareBase, "/1/clouddrive/share/sharepage/token",
+	err := q.shareCall(ctx, http.MethodPost, "/1/clouddrive/share/sharepage/token",
 		nil, map[string]string{"pwd_id": pwdID, "passcode": passcode}, &out)
 	if err != nil {
 		return "", err
@@ -190,7 +196,7 @@ func (q *Quark) shareDetail(ctx context.Context, pwdID, stoken, pdirFid string) 
 		"_page":    {"1"},
 		"_size":    {"200"},
 	}
-	if err := q.call(ctx, http.MethodGet, quarkShareBase, "/1/clouddrive/share/sharepage/detail",
+	if err := q.shareCall(ctx, http.MethodGet, "/1/clouddrive/share/sharepage/detail",
 		qs, nil, &out); err != nil {
 		return nil, err
 	}
@@ -352,28 +358,12 @@ func (q *Quark) DirectURL(ctx context.Context, cachePath string) (string, error)
 	if ck == "" {
 		return "", fmt.Errorf("未配置夸克 cookie，请在设置页扫码登录")
 	}
-	body, _ := json.Marshal(map[string]any{"fids": []string{cachePath}})
+	body, ctype, err := jsonBody(map[string]any{"fids": []string{cachePath}})
+	if err != nil {
+		return "", err
+	}
 	qs := url.Values{"pr": {"ucpro"}, "fr": {"pc"}, "uc_param_str": {""},
 		"__t": {fmt.Sprintf("%d", time.Now().UnixMilli())}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		quarkDriveBase+"/1/clouddrive/file/download?"+qs.Encode(), strings.NewReader(string(body)))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", QuarkUA)
-	req.Header.Set("Cookie", ck)
-	req.Header.Set("Referer", "https://pan.quark.cn/")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := q.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-
-	// **关键**：把响应里刷新的 cookie（尤其 __puus）合并进去，供拉流使用。
-	q.mergeStreamCookie(ck, resp.Cookies())
-
 	var out struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
@@ -381,7 +371,12 @@ func (q *Quark) DirectURL(ctx context.Context, cachePath string) (string, error)
 			DownloadURL string `json:"download_url"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := doHTTP(ctx, q.http, httpReq{
+		Method: http.MethodPost, URL: quarkDriveBase + "/1/clouddrive/file/download?" + qs.Encode(),
+		Headers: map[string]string{"User-Agent": QuarkUA, "Cookie": ck, "Referer": "https://pan.quark.cn/"},
+		Body:    body, CType: ctype, Retry: true, Label: "夸克",
+		OnResponse: func(resp *http.Response) { q.mergeStreamCookie(ck, resp.Cookies()) },
+	}, &out); err != nil {
 		return "", err
 	}
 	if out.Code != 0 || len(out.Data) == 0 || out.Data[0].DownloadURL == "" {

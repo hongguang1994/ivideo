@@ -1,14 +1,38 @@
--- 资源目录：你收集来的分享链接（不含文件本体）。
+-- 网盘来源：一个分享链接只保存一次；收藏只是一个标记，资源可继续引用它。
+CREATE TABLE IF NOT EXISTS share_sources (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT    NOT NULL,
+    share_url       TEXT    NOT NULL,
+    share_pwd       TEXT,
+    share_id        TEXT,
+    source_key      TEXT    NOT NULL UNIQUE,
+    is_bookmarked   INTEGER NOT NULL DEFAULT 0,
+    title           TEXT,
+    remark          TEXT,
+    category        TEXT,
+    status          TEXT    NOT NULL DEFAULT 'unknown',
+    last_checked_at INTEGER NOT NULL DEFAULT 0,
+    file_count      INTEGER NOT NULL DEFAULT 0,
+    total_size      INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sources_bookmarked_created ON share_sources (is_bookmarked, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sources_provider_share_id ON share_sources (provider, share_id);
+
+-- 资源目录：分享来源中的具体文件。
 CREATE TABLE IF NOT EXISTS resources (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id  INTEGER NOT NULL,
     title      TEXT    NOT NULL,
     poster     TEXT,
     overview   TEXT,
-    provider   TEXT    NOT NULL,            -- 源网盘类型：aliyun / pikpak / ...
-    share_url  TEXT    NOT NULL,            -- 分享链接
-    share_pwd  TEXT,                        -- 提取码（可选）
     file_path  TEXT,                        -- 分享内具体文件路径（可选）
-    created_at INTEGER NOT NULL
+    resource_key TEXT NOT NULL UNIQUE,      -- source + 文件路径的稳定去重键
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (source_id) REFERENCES share_sources (id) ON DELETE RESTRICT
 );
 
 -- 缓存项：某个资源在“自己网盘”里的转存状态。一个资源一条。
@@ -22,34 +46,233 @@ CREATE TABLE IF NOT EXISTS cache_items (
     last_access INTEGER NOT NULL DEFAULT 0, -- 最后播放时间（unix 秒），用于 LRU
     error       TEXT,                       -- 最近一次失败原因
     updated_at  INTEGER NOT NULL,
-    FOREIGN KEY (resource_id) REFERENCES resources (id)
+    FOREIGN KEY (resource_id) REFERENCES resources (id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_cache_status_access ON cache_items (status, last_access);
+CREATE INDEX IF NOT EXISTS idx_resources_source_path ON resources (source_id, file_path);
+CREATE INDEX IF NOT EXISTS idx_resources_created_at ON resources (created_at DESC);
 
 -- 网盘凭据：阿里存 refresh_token，115/夸克存 cookie。扫码/填写后落库，轮换自动更新。
-CREATE TABLE IF NOT EXISTS credentials (
+CREATE TABLE IF NOT EXISTS provider_credentials (
     provider   TEXT PRIMARY KEY,          -- aliyun / 115 / quark
     token      TEXT NOT NULL DEFAULT '',  -- refresh_token 或 cookie
     extra      TEXT NOT NULL DEFAULT '',  -- 预留 JSON（如 open token、drive_id 等）
     updated_at INTEGER NOT NULL
 );
 
--- 分享库：收藏的各网盘分享链接（整份分享，区别于 resources 的单个文件）。
-CREATE TABLE IF NOT EXISTS shares (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider        TEXT    NOT NULL,                    -- aliyun / 115 / quark / pikpak / ...
-    share_url       TEXT    NOT NULL,                    -- 分享链接
-    share_pwd       TEXT,                                -- 提取码（可选）
-    share_id        TEXT,                                -- 从链接提取的分享 ID（可选，便于查重/调用）
-    title           TEXT,                                -- 名称/标题（可选）
-    remark          TEXT,                                -- 备注（可选）
-    category        TEXT,                                -- 分类：电影/剧集/音乐/...（可选）
-    status          TEXT    NOT NULL DEFAULT 'unknown',  -- unknown / valid / invalid
-    last_checked_at INTEGER NOT NULL DEFAULT 0,          -- 上次校验有效性（unix）
-    file_count      INTEGER NOT NULL DEFAULT 0,          -- 分享内条目数（浏览后缓存，0=未知）
-    total_size      INTEGER NOT NULL DEFAULT 0,          -- 总大小（字节，0=未知）
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL,
-    UNIQUE (provider, share_url)                         -- 防重复收藏
+-- 应用设置：保存可由前端调整的调度与运行参数。
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key   TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL DEFAULT '',
+    updated_at    INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS media_content_analysis (
+    resource_id INTEGER PRIMARY KEY,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    video_codec TEXT NOT NULL DEFAULT '',
+    audio_languages TEXT NOT NULL DEFAULT '',
+    frame_signature TEXT NOT NULL DEFAULT '',
+    ocr_text TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ready',
+    error TEXT NOT NULL DEFAULT '',
+    analyzed_at INTEGER NOT NULL,
+    FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_content_signature ON media_content_analysis(frame_signature);
+
+CREATE TABLE IF NOT EXISTS media_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL UNIQUE,
+    raw_title TEXT NOT NULL DEFAULT '',
+    normalized_title TEXT NOT NULL DEFAULT '',
+    media_kind TEXT NOT NULL DEFAULT 'episode',
+    suggested_library TEXT NOT NULL DEFAULT 'review',
+    year INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'grouped',
+    decision_source TEXT NOT NULL DEFAULT 'auto',
+    selected_source TEXT NOT NULL DEFAULT '',
+    selected_id TEXT NOT NULL DEFAULT '',
+    canonical_title TEXT NOT NULL DEFAULT '',
+    confidence INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_groups_status_updated ON media_groups(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS media_group_members (
+    group_id INTEGER NOT NULL,
+    resource_id INTEGER NOT NULL UNIQUE,
+    season INTEGER NOT NULL DEFAULT 0,
+    episode INTEGER NOT NULL DEFAULT 0,
+    confidence INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (group_id, resource_id),
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS media_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    original_title TEXT NOT NULL DEFAULT '',
+    year INTEGER NOT NULL DEFAULT 0,
+    media_kind TEXT NOT NULL DEFAULT '',
+    library TEXT NOT NULL DEFAULT 'review',
+    score INTEGER NOT NULL DEFAULT 0,
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    UNIQUE(group_id, source, provider_id),
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_media_candidates_group_score ON media_candidates(group_id, score DESC);
+
+CREATE TABLE IF NOT EXISTS media_publications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'published',
+    output_path TEXT NOT NULL DEFAULT '',
+    metadata_hash TEXT NOT NULL DEFAULT '',
+    published_at INTEGER NOT NULL,
+    UNIQUE(group_id, version),
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_media_publications_status ON media_publications(status, published_at);
+
+CREATE TABLE IF NOT EXISTS media_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias TEXT NOT NULL,
+    normalized_alias TEXT NOT NULL,
+    canonical_title TEXT NOT NULL,
+    media_kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    year INTEGER NOT NULL DEFAULT 0,
+    confidence INTEGER NOT NULL DEFAULT 0,
+    hit_count INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(normalized_alias, media_kind, year, source, provider_id)
+);
+CREATE INDEX IF NOT EXISTS idx_media_alias_lookup ON media_aliases(normalized_alias, media_kind, year, confidence DESC);
+
+-- 路径语义分析快照：保留完整证据和分析器版本，便于规则升级后重新分析。
+CREATE TABLE IF NOT EXISTS media_path_analyses (
+    resource_id INTEGER PRIMARY KEY,
+    analyzer_version TEXT NOT NULL,
+    path_hash TEXT NOT NULL,
+    analysis_json TEXT NOT NULL,
+    analyzed_at INTEGER NOT NULL,
+    FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_path_analyses_version ON media_path_analyses(analyzer_version, analyzed_at);
+
+-- 路径阶段的片名候选；与元数据服务返回的 media_candidates 分开保存。
+CREATE TABLE IF NOT EXISTS media_title_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    normalized_title TEXT NOT NULL,
+    year INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL,
+    weight INTEGER NOT NULL DEFAULT 0,
+    auto_eligible INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE(resource_id, normalized_title, source),
+    FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_title_candidates_resource_weight ON media_title_candidates(resource_id, weight DESC);
+
+-- 各复核器产生的历史证据，不覆盖旧结果。
+CREATE TABLE IF NOT EXISTS media_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER,
+    resource_id INTEGER NOT NULL,
+    verifier TEXT NOT NULL,
+    verifier_version TEXT NOT NULL,
+    status TEXT NOT NULL,
+    score_delta INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_verifications_group_created ON media_verifications(group_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verifications_resource_created ON media_verifications(resource_id, created_at DESC);
+
+-- 媒体整理任务及阶段，用于进度、失败重试和前端展示。
+CREATE TABLE IF NOT EXISTS media_processing_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL DEFAULT 'scrape',
+    status TEXT NOT NULL DEFAULT 'queued',
+    total_count INTEGER NOT NULL DEFAULT 0,
+    processed_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL DEFAULT 0,
+    finished_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_processing_jobs_status_created ON media_processing_jobs(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS media_processing_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    group_id INTEGER,
+    resource_id INTEGER,
+    stage TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL DEFAULT 0,
+    finished_at INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(job_id, stage, group_id, resource_id),
+    FOREIGN KEY(job_id) REFERENCES media_processing_jobs(id) ON DELETE CASCADE,
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_processing_steps_job_status ON media_processing_steps(job_id, status, stage);
+
+-- 发布制品逐项记录，支持判断 NFO、图片、STRM 或 Jellyfin 同步具体失败在哪一步。
+CREATE TABLE IF NOT EXISTS media_publication_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    artifact_type TEXT NOT NULL,
+    path TEXT NOT NULL,
+    content_hash TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ready',
+    error TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    UNIQUE(group_id, artifact_type, path),
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_publication_artifacts_group_status ON media_publication_artifacts(group_id, status);
+
+-- 独立标签字典及作品标签关系，记录自动生成或人工设置的来源。
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS media_group_tags (
+    group_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    confidence INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(group_id, tag_id, source),
+    FOREIGN KEY(group_id) REFERENCES media_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_media_group_tags_tag ON media_group_tags(tag_id, group_id);

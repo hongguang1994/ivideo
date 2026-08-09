@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -321,6 +322,41 @@ func (a *Aliyun) OriginalURL(ctx context.Context, cachePath string) (string, err
 		return "", err
 	}
 	return a.originalURL(ctx, openTok, cachePath)
+}
+
+// ProbePlayback 通过开放接口原画直链读取固定大小的数据，验证 TV/OAuth 令牌的
+// 实际播放能力。Range 不被上游接受时也会在 sampleBytes 处主动停止。
+func (a *Aliyun) ProbePlayback(ctx context.Context, cachePath string, sampleBytes int64) (cache.PlaybackProbeResult, error) {
+	if sampleBytes <= 0 {
+		sampleBytes = 4 << 20
+	}
+	rawURL, err := a.OriginalURL(ctx, cachePath)
+	if err != nil {
+		return cache.PlaybackProbeResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return cache.PlaybackProbeResult{}, err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", sampleBytes-1))
+	started := time.Now()
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return cache.PlaybackProbeResult{}, fmt.Errorf("读取原画失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return cache.PlaybackProbeResult{}, fmt.Errorf("原画地址返回 %s", resp.Status)
+	}
+	n, err := io.Copy(io.Discard, io.LimitReader(resp.Body, sampleBytes))
+	d := time.Since(started)
+	if err != nil {
+		return cache.PlaybackProbeResult{}, fmt.Errorf("读取原画数据失败: %w", err)
+	}
+	if n == 0 {
+		return cache.PlaybackProbeResult{}, fmt.Errorf("原画地址未返回数据")
+	}
+	return cache.PlaybackProbeResult{Bytes: n, Duration: d}, nil
 }
 
 // VideoDurationSeconds 取已转存文件的视频时长(秒)，0 表示未知。

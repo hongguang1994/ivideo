@@ -93,6 +93,15 @@ func (d *Dispatcher) VideoDurationSeconds(ctx context.Context, cachePath string)
 	return 0, nil
 }
 
+// ProbePlayback 按缓存路径路由到对应网盘的限量播放探测。
+func (d *Dispatcher) ProbePlayback(ctx context.Context, cachePath string, sampleBytes int64) (cache.PlaybackProbeResult, error) {
+	b, inner := d.routeByPath(cachePath)
+	if p, ok := b.(cache.PlaybackProber); ok {
+		return p.ProbePlayback(ctx, inner, sampleBytes)
+	}
+	return cache.PlaybackProbeResult{}, cache.ErrNotImplemented
+}
+
 // Verify 按 provider 路由校验。"115"->115；其余(aliyun/aliyun_open)->默认盘。
 func (d *Dispatcher) Verify(ctx context.Context, provider string) error {
 	b := d.def

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -55,6 +56,151 @@ func (h *Handler) AddShare(c *gin.Context) {
 	}
 	sh.ID = id
 	resp.OK(c, sh)
+}
+
+type batchShareRequest struct {
+	Items []store.Share `json:"items"`
+}
+
+type batchShareResult struct {
+	Index    int    `json:"index"`
+	ID       int64  `json:"id,omitempty"`
+	Provider string `json:"provider"`
+	ShareURL string `json:"shareUrl"`
+	Status   string `json:"status"`
+	Message  string `json:"message,omitempty"`
+}
+
+// AddSharesBatch 批量收藏分享，并逐条返回成功、重复或失败状态。POST /api/shares/batch
+func (h *Handler) AddSharesBatch(c *gin.Context) {
+	var req batchShareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if len(req.Items) == 0 {
+		resp.Fail(c, http.StatusBadRequest, "没有可收藏的分享")
+		return
+	}
+	if len(req.Items) > 500 {
+		resp.Fail(c, http.StatusBadRequest, "一次最多收藏 500 条分享")
+		return
+	}
+
+	existing, err := h.store.ListShares()
+	if err != nil {
+		resp.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	seen := make(map[string]bool, len(existing)+len(req.Items))
+	for _, sh := range existing {
+		seen[batchShareKey(sh.Provider, sh.ShareURL)] = true
+	}
+
+	results := make([]batchShareResult, 0, len(req.Items))
+	added, duplicates, failed := 0, 0, 0
+	for i, sh := range req.Items {
+		sh.Provider = strings.ToLower(strings.TrimSpace(sh.Provider))
+		sh.ShareURL = strings.TrimSpace(sh.ShareURL)
+		sh.SharePwd = strings.TrimSpace(sh.SharePwd)
+		sh.Title = strings.TrimSpace(sh.Title)
+		sh.Category = strings.TrimSpace(sh.Category)
+		result := batchShareResult{Index: i, Provider: sh.Provider, ShareURL: sh.ShareURL}
+
+		if sh.Provider == "" {
+			sh.Provider = detectShareProvider(sh.ShareURL)
+			result.Provider = sh.Provider
+		}
+		if message := validateBatchShare(sh); message != "" {
+			result.Status = "failed"
+			result.Message = message
+			failed++
+			results = append(results, result)
+			continue
+		}
+
+		key := batchShareKey(sh.Provider, sh.ShareURL)
+		duplicate := seen[key]
+		if sh.ShareID == "" {
+			sh.ShareID = extractShareID(sh.ShareURL)
+		}
+		if sh.Status == "" {
+			sh.Status = "unknown"
+		}
+		id, addErr := h.store.AddShare(sh)
+		if addErr != nil {
+			result.Status = "failed"
+			result.Message = addErr.Error()
+			failed++
+		} else {
+			result.ID = id
+			seen[key] = true
+			if duplicate {
+				result.Status = "duplicate"
+				result.Message = "已收藏，已合并填写的信息"
+				duplicates++
+			} else {
+				result.Status = "added"
+				added++
+			}
+		}
+		results = append(results, result)
+	}
+
+	resp.OK(c, gin.H{
+		"added":      added,
+		"duplicates": duplicates,
+		"failed":     failed,
+		"results":    results,
+	})
+}
+
+func validateBatchShare(sh store.Share) string {
+	if sh.ShareURL == "" {
+		return "缺少分享链接"
+	}
+	if sh.Provider != "aliyun" && sh.Provider != "115" && sh.Provider != "quark" {
+		return "仅支持阿里云盘、115 和夸克分享"
+	}
+	parsed, err := url.Parse(sh.ShareURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return "分享链接格式不正确"
+	}
+	if detectShareProvider(sh.ShareURL) != sh.Provider {
+		return "网盘类型与分享链接不匹配"
+	}
+	return ""
+}
+
+func detectShareProvider(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	switch {
+	case host == "alipan.com" || strings.HasSuffix(host, ".alipan.com"),
+		host == "aliyundrive.com" || strings.HasSuffix(host, ".aliyundrive.com"):
+		return "aliyun"
+	case host == "115.com" || strings.HasSuffix(host, ".115.com"):
+		return "115"
+	case host == "quark.cn" || strings.HasSuffix(host, ".quark.cn"):
+		return "quark"
+	default:
+		return ""
+	}
+}
+
+func batchShareKey(provider, rawURL string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	rawURL = strings.TrimSpace(rawURL)
+	if parsed, err := url.Parse(rawURL); err == nil {
+		parsed.Scheme = strings.ToLower(parsed.Scheme)
+		parsed.Host = strings.ToLower(parsed.Host)
+		parsed.Fragment = ""
+		rawURL = parsed.String()
+	}
+	return provider + "\x00" + rawURL
 }
 
 // UpdateShare 更新分享的可编辑字段。PUT /api/shares/:id

@@ -2,9 +2,7 @@ package backends
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -90,25 +88,20 @@ func (p *Pan115) openAccessToken(ctx context.Context) (string, error) {
 
 	u := fmt.Sprintf("%s?client_uid=&client_key=&driver_txt=%s&server_use=true&refresh_ui=%s",
 		pan115RenewURL, pan115DriverTxt, url.QueryEscape(rt))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", p.ua)
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("115 令牌续期请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
 	var out struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 		Text         string `json:"text"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("115 令牌续期响应解析失败: %s", truncateBody(raw))
+	if err := doHTTP(ctx, p.http, httpReq{
+		Method:  http.MethodGet,
+		URL:     u,
+		Headers: map[string]string{"User-Agent": p.ua},
+		Label:   "115 令牌续期",
+		NoRetry: true,
+	}, &out); err != nil {
+		return "", err
 	}
 	if out.AccessToken == "" {
 		return "", fmt.Errorf("未取到 115 access_token: %s", out.Text)
@@ -140,19 +133,17 @@ func (p *Pan115) apiGet(ctx context.Context, path string, q url.Values, out any)
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("User-Agent", p.ua)
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	return json.Unmarshal(raw, out)
+	return doHTTP(ctx, p.http, httpReq{
+		Method:  http.MethodGet,
+		URL:     u,
+		Headers: p.authHeaders(tok),
+		Label:   "115",
+	}, out)
+}
+
+// authHeaders 是 115 开放接口的通用请求头。
+func (p *Pan115) authHeaders(tok string) map[string]string {
+	return map[string]string{"Authorization": "Bearer " + tok, "User-Agent": p.ua}
 }
 
 // apiPost 带 Bearer POST 表单到 115 开放接口并解 JSON。
@@ -161,27 +152,41 @@ func (p *Pan115) apiPost(ctx context.Context, path string, form url.Values, out 
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pan115Base+path,
-		strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("User-Agent", p.ua)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	return json.Unmarshal(raw, out)
+	body, ctype := formBody(form)
+	return doHTTP(ctx, p.http, httpReq{
+		Method:  http.MethodPost,
+		URL:     pan115Base + path,
+		Headers: p.authHeaders(tok),
+		Body:    body,
+		CType:   ctype,
+		Label:   "115",
+	}, out)
 }
 
 // Verify 实测校验 115 令牌是否有效（换一次 access_token）。
 func (p *Pan115) Verify(ctx context.Context, provider string) error {
-	if provider != "115" {
+	if provider != "115" && provider != "115_cookie" {
 		return fmt.Errorf("115 适配器不支持校验 provider: %s", provider)
+	}
+	if provider == "115_cookie" || (provider == "115" && p.tokens != nil && p.tokens.GetToken("115") == "") {
+		if p.webCookie() == "" {
+			return fmt.Errorf("未配置 115 网页 cookie")
+		}
+		var out struct {
+			State bool   `json:"state"`
+			Error string `json:"error"`
+		}
+		if err := doHTTP(ctx, p.http, httpReq{
+			Method:  http.MethodGet,
+			URL:     pan115Web + "/files?aid=1&cid=0&offset=0&limit=1",
+			Headers: p.webHeaders(), Label: "115 cookie",
+		}, &out); err != nil {
+			return err
+		}
+		if !out.State {
+			return fmt.Errorf("115 cookie 无效: %s", out.Error)
+		}
+		return nil
 	}
 	_, err := p.openAccessToken(ctx)
 	return err

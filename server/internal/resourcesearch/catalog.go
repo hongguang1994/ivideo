@@ -1,0 +1,74 @@
+package resourcesearch
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+// CatalogEntry 是 ivideo 已收藏分享与已导入资源的统一搜索投影。
+type CatalogEntry struct {
+	Provider     string
+	ShareURL     string
+	SharePwd     string
+	Title        string
+	Remark       string
+	ResourceType string
+	FilePath     string
+	Status       string
+}
+
+// CatalogLoader 将具体数据库实现隔离在资源搜索引擎之外。
+type CatalogLoader func(context.Context) ([]CatalogEntry, error)
+
+// CatalogSource 优先检索 ivideo 已经收录的数据，不重复请求外部网站。
+type CatalogSource struct {
+	load CatalogLoader
+}
+
+func NewCatalogSource(load CatalogLoader) *CatalogSource { return &CatalogSource{load: load} }
+
+func (s *CatalogSource) Descriptor() SourceDescriptor {
+	return SourceDescriptor{ID: "local-catalog", Name: "ivideo 本地索引", Priority: 120}
+}
+
+func (s *CatalogSource) Search(ctx context.Context, query string) ([]Result, Meta, error) {
+	queryKey := normalizeSearchText(query)
+	if queryKey == "" {
+		return []Result{}, Meta{Source: "local-catalog"}, fmt.Errorf("搜索关键词不能为空")
+	}
+	if s == nil || s.load == nil {
+		return []Result{}, Meta{Source: "local-catalog"}, ErrSourceNotConfigured
+	}
+	entries, err := s.load(ctx)
+	if err != nil {
+		return []Result{}, Meta{Source: "local-catalog"}, err
+	}
+	items := make([]Result, 0)
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return items, Meta{Source: "local-catalog", Scanned: len(entries)}, err
+		}
+		if strings.EqualFold(strings.TrimSpace(entry.Status), "invalid") {
+			continue
+		}
+		matchScore, matched := catalogMatchScore(query, entry)
+		if !matched {
+			continue
+		}
+		title := strings.TrimSpace(entry.Title)
+		if title == "" {
+			title = strings.TrimSpace(entry.Remark)
+		}
+		if title == "" {
+			title = strings.TrimSpace(query)
+		}
+		items = append(items, Result{
+			Provider: entry.Provider, ShareURL: entry.ShareURL, SharePwd: entry.SharePwd,
+			Title: title, ResourceType: entry.ResourceType, FileName: entry.FilePath,
+			Source: "local-catalog", SourceName: "ivideo 本地索引", Repository: "ivideo", Path: entry.FilePath,
+			Score: matchScore,
+		})
+	}
+	return items, Meta{Source: "local-catalog", Scanned: len(entries)}, nil
+}

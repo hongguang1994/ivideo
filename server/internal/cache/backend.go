@@ -5,6 +5,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // ErrNotImplemented 供尚未实现的适配器返回。
@@ -103,4 +104,16 @@ type TokenRefresher interface {
 // provider 取 "aliyun"(网页版 token)/ "aliyun_open"(开放接口 token)等。
 type TokenVerifier interface {
 	Verify(ctx context.Context, provider string) error
+}
+
+// PlaybackProbeResult 是一次受限播放探测的实测结果。
+type PlaybackProbeResult struct {
+	Bytes    int64
+	Duration time.Duration
+}
+
+// PlaybackProber 是可选能力：从已缓存资源读取少量原画数据，验证播放链路并测速。
+// 实现必须限制读取量和总耗时，不能把整部视频下载下来。
+type PlaybackProber interface {
+	ProbePlayback(ctx context.Context, cachePath string, sampleBytes int64) (PlaybackProbeResult, error)
 }

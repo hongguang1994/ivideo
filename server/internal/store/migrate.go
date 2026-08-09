@@ -45,9 +45,10 @@ func Migrate(fromDriver, fromDSN, toDriver, toDSN string) (map[string]int, error
 		name string
 		fn   func(src, dst *sql.DB) (int, error)
 	}{
+		{"provider_credentials", migrateCredentials},
+		{"share_sources", migrateShares},
 		{"resources", migrateResources},
 		{"cache_items", migrateCacheItems},
-		{"credentials", migrateCredentials},
 	} {
 		n, err := t.fn(src, dst)
 		counts[t.name] = n
@@ -72,9 +73,13 @@ func migrateResources(src, dst *sql.DB) (int, error) {
 		if err := rows.Scan(&id, &title, &poster, &overview, &provider, &shareURL, &sharePwd, &filePath, &createdAt); err != nil {
 			return n, err
 		}
-		if _, err := dst.Exec(`INSERT INTO resources (id, title, poster, overview, provider, share_url, share_pwd, file_path, created_at)
+		sourceID, err := ensureMigratedSource(dst, provider, shareURL, sharePwd, createdAt)
+		if err != nil {
+			return n, err
+		}
+		if _, err := dst.Exec(`INSERT INTO resources (id, source_id, title, poster, overview, file_path, resource_key, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, title, poster, overview, provider, shareURL, sharePwd, filePath, createdAt); err != nil {
+			id, sourceID, title, poster, overview, filePath, resourceKey(sourceID, filePath), createdAt, createdAt); err != nil {
 			return n, err
 		}
 		n++
@@ -119,11 +124,57 @@ func migrateCredentials(src, dst *sql.DB) (int, error) {
 		if err := rows.Scan(&provider, &token, &extra, &updatedAt); err != nil {
 			return n, err
 		}
-		if _, err := dst.Exec(`INSERT INTO credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)`,
+		if _, err := dst.Exec(`INSERT INTO provider_credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)`,
 			provider, token, extra, updatedAt); err != nil {
 			return n, err
 		}
 		n++
 	}
 	return n, rows.Err()
+}
+
+func migrateShares(src, dst *sql.DB) (int, error) {
+	rows, err := src.Query(`SELECT id, provider, share_url, COALESCE(share_pwd,''), COALESCE(share_id,''),
+		COALESCE(title,''), COALESCE(remark,''), COALESCE(category,''), status, last_checked_at,
+		file_count, total_size, created_at, updated_at FROM shares`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var sh Share
+		if err := rows.Scan(&sh.ID, &sh.Provider, &sh.ShareURL, &sh.SharePwd, &sh.ShareID,
+			&sh.Title, &sh.Remark, &sh.Category, &sh.Status, &sh.LastCheckedAt,
+			&sh.FileCount, &sh.TotalSize, &sh.CreatedAt, &sh.UpdatedAt); err != nil {
+			return n, err
+		}
+		if _, err := dst.Exec(`INSERT INTO share_sources (id, provider, share_url, share_pwd, share_id, source_key, is_bookmarked,
+			title, remark, category, status, last_checked_at, file_count, total_size, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			sh.ID, sh.Provider, sh.ShareURL, sh.SharePwd, sh.ShareID, shareSourceKey(sh.Provider, sh.ShareURL),
+			sh.Title, sh.Remark, sh.Category, sh.Status, sh.LastCheckedAt, sh.FileCount, sh.TotalSize, sh.CreatedAt, sh.UpdatedAt); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, rows.Err()
+}
+
+func ensureMigratedSource(dst *sql.DB, provider, shareURL, sharePwd string, createdAt int64) (int64, error) {
+	key := shareSourceKey(provider, shareURL)
+	var id int64
+	err := dst.QueryRow(`SELECT id FROM share_sources WHERE source_key = ?`, key).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	res, err := dst.Exec(`INSERT INTO share_sources (provider, share_url, share_pwd, source_key, is_bookmarked, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 0, ?, ?)`, provider, shareURL, sharePwd, key, createdAt, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }

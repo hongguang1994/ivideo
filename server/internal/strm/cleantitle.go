@@ -12,8 +12,14 @@ import (
 // 拿不准的年份照常取（个别错的靠 Jellyfin 手动识别修正）。
 
 var (
+	// 常见网盘下载前缀不是片名的一部分。
+	reSourcePrefix = regexp.MustCompile(`^(?:\[[^\]]+\]|【[^】]+】)\s*`)
+	// 中文片名末尾常见的画质/编码标记，清洗时只处理尾部。
+	reTechnicalSuffix = regexp.MustCompile(`(?i)(?:[ ._-]*(?:2160p|1080p|720p|480p|4k|8k|hdr|hq|国语|粤语|普通话|中字|60帧|杜比))+$`)
 	// 年份（独立成词的 1900–2099）。
 	reYearWord = regexp.MustCompile(`^(19|20)\d{2}$`)
+	// 分享目录常把年份直接粘在中文片名后，例如「撞大运2024」。
+	reCJKTrailingYear = regexp.MustCompile(`^(.+?)((?:19|20)\d{2})$`)
 	// 词内的技术标记子串：分辨率 / 来源 / 编码 / 音轨 / 字幕语言 / 组名特征等。
 	reTechSub = regexp.MustCompile(`(?i)(` +
 		`(bd|hd|hr|web|dvd)?(2160|1080|720|480)[pi]?` + // 分辨率
@@ -28,6 +34,24 @@ var (
 
 // CleanMovieTitle 从脏文件名提取干净标题和年份（年份 0 表示未取到）。
 func CleanMovieTitle(raw string) (title string, year int) {
+	for {
+		trimmed := strings.TrimSpace(raw)
+		cleaned := reSourcePrefix.ReplaceAllString(trimmed, "")
+		if cleaned == trimmed {
+			break
+		}
+		raw = cleaned
+	}
+	// 仅对包含中文的资源去掉尾部技术标记；纯英文标题如「4K Killer」保留。
+	if hasCJK(raw) {
+		trailing := reTechnicalSuffix.ReplaceAllString(raw, "")
+		if strings.TrimSpace(trailing) != "" {
+			raw = trailing
+		}
+		if match := reCJKTrailingYear.FindStringSubmatch(strings.TrimSpace(raw)); len(match) == 3 && hasCJK(match[1]) {
+			raw = strings.TrimSpace(match[1]) + " " + match[2]
+		}
+	}
 	// 分隔符（. _ -）→ 空格，再分词。全角标点（：· 等）保留在词内。
 	norm := strings.NewReplacer(".", " ", "_", " ", "-", " ").Replace(raw)
 	words := strings.Fields(norm)

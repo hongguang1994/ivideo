@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { browseShare, importShare, saveShareItem, type ShareEntry } from "../api";
+import { getSharePreferences } from "../sharePreferences";
 
 // 格式化文件大小
 function humanSize(n: number): string {
@@ -24,7 +25,7 @@ function detectProvider(url: string): string {
   return "aliyun"; // 兜底
 }
 
-export default function Browse() {
+export default function Browse({ embedded = false }: { embedded?: boolean }) {
   const [shareUrl, setShareUrl] = useState("");
   const [provider, setProvider] = useState("aliyun");
   const [sharePwd, setSharePwd] = useState("");
@@ -33,7 +34,7 @@ export default function Browse() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [opened, setOpened] = useState(false);
-  const [targetFolder, setTargetFolder] = useState("ivideo"); // 转存目标目录
+  const [targetFolder, setTargetFolder] = useState(() => getSharePreferences().targetFolder); // 转存目标目录
   const [saving, setSaving] = useState(""); // 正在转存的条目 path
   const [saved, setSaved] = useState<Record<string, string>>({}); // path -> 状态文案
   const [importMsg, setImportMsg] = useState("");
@@ -99,6 +100,7 @@ export default function Browse() {
 
   // 从「分享库」点「浏览」跳转过来：预填链接/提取码并自动加载。
   const location = useLocation();
+  const libraryShare = Boolean((location.state as { shareUrl?: string } | null)?.shareUrl);
   useEffect(() => {
     const st = location.state as { shareUrl?: string; sharePwd?: string; provider?: string } | null;
     if (st?.shareUrl) {
@@ -114,11 +116,12 @@ export default function Browse() {
   return (
     <div>
       <div className="page-head">
-        <h1>分享浏览</h1>
-        <p>用分享链接 + 提取码浏览网盘目录（只读），可手动转存到自己的盘。</p>
+        {embedded && <Link className="settings-back-link" to="/settings/shares">返回分享库管理</Link>}
+        <h1>{embedded ? "分享内容" : "分享浏览"}</h1>
+        <p>{embedded ? "浏览收藏中的目录，并选择导入或转存内容。" : "用分享链接和提取码浏览网盘目录。"}</p>
       </div>
 
-      <div className="add-form">
+      {(!embedded || !libraryShare) && <div className="add-form">
         <input
           placeholder="分享链接 如 https://www.alipan.com/s/xxxxx"
           value={shareUrl}
@@ -148,7 +151,7 @@ export default function Browse() {
         <button className="primary" onClick={() => list("")} disabled={loading}>
           {loading ? "加载中…" : "浏览"}
         </button>
-      </div>
+      </div>}
 
       {error && <p style={{ color: "#f87171" }}>出错了: {error}</p>}
 

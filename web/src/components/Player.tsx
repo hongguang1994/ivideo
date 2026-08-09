@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
-import Hls from "hls.js";
 
-// 播放器：普通视频用原生 <video>；HLS 用 hls.js（显式 hls 或 src 含 .m3u8）。
+// 普通视频和 Safari 原生 HLS 直接使用 <video>；其他浏览器播放 HLS 时才下载 hls.js。
 export default function Player({
   src,
   name,
@@ -18,14 +17,28 @@ export default function Player({
     if (!video) return;
 
     const isHls = hls || src.toLowerCase().includes(".m3u8");
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      return () => hls.destroy();
+    if (!isHls || video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = src;
+      return;
     }
-    // 原生播放（含 Safari 原生 HLS）
-    video.src = src;
+
+    let disposed = false;
+    let destroy: (() => void) | undefined;
+    void import("hls.js").then(({ default: Hls }) => {
+      if (disposed) return;
+      if (!Hls.isSupported()) {
+        video.src = src;
+        return;
+      }
+      const player = new Hls();
+      destroy = () => player.destroy();
+      player.loadSource(src);
+      player.attachMedia(video);
+    });
+    return () => {
+      disposed = true;
+      destroy?.();
+    };
   }, [src, hls]);
 
   return (

@@ -43,17 +43,14 @@ services:
     # devices:
     #   - /dev/dri:/dev/dri
 
-  # MySQL：可选数据库后端。默认 server 用 SQLite；切到 MySQL 时：
-  #   1) 起本服务：docker compose up -d mysql
-  #   2) server 环境设 DB_DRIVER=mysql、DB_DSN=root:密码@tcp(mysql:3306)/ivideo?charset=utf8mb4
-  # 不切 MySQL 时本服务可以不启动（server 走 SQLite，互不影响）。
+  # MySQL：ivideo 的正式数据源。端口保留给局域网中的本机数据库工具连接。
   mysql:
     image: mysql:8
     container_name: ivideo-mysql
     restart: unless-stopped
     environment:
       - MYSQL_DATABASE=ivideo
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-ivideo_root}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?请在 .env 设置 MYSQL_ROOT_PASSWORD}
       - TZ=Asia/Shanghai
     ports:
       - "3306:3306"   # 暴露到宿主/局域网,可从 Mac 等直接连(自用内网)
@@ -70,6 +67,7 @@ services:
     command: ["--config", "/data/conf.yaml"]
     environment:
       - GIN_MODE=release   # Gin 框架自身的环境变量，非 viper 配置
+      - DB_DSN=${DB_DSN:?请在 .env 设置 DB_DSN}
     volumes:
       - ./data/server:/data
       - ./data/media:/media

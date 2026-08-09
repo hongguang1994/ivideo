@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// cfgFile 是 --config 指定的配置文件路径（空则自动查找 ./conf/conf.json）。
+// cfgFile 是 --config 指定的配置文件路径（空则自动查找 YAML 配置）。
 var cfgFile string
 
 var rootCmd = &cobra.Command{
@@ -30,5 +30,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径（默认查找 ./conf/conf.json）")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径（默认查找 ./configs/conf.yaml 或 ./conf.yaml）")
 }
