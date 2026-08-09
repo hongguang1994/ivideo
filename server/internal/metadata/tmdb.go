@@ -139,14 +139,18 @@ func (c *tmdbClient) searchResults(ctx context.Context, kind, title string, year
 const tmdbAnimationGenreID = 16
 
 func pickSearchResult(items []tmdbItem, title string, year int, requireAnimation bool) (tmdbItem, bool) {
+	return pickSearchResultPolicy(items, title, year, requireAnimation, true)
+}
+
+func pickSearchResultPolicy(items []tmdbItem, title string, year int, requireAnimation, animationKnown bool) (tmdbItem, bool) {
 	want := normalizeTitle(title)
 	var fallback *tmdbItem
 	for _, item := range items {
-		if requireAnimation && !containsInt(item.GenreIDs, tmdbAnimationGenreID) {
+		if animationKnown && requireAnimation && !containsInt(item.GenreIDs, tmdbAnimationGenreID) {
 			continue
 		}
 		// 非动漫资源优先排除同名动画，避免真人版和动画版混淆。
-		if !requireAnimation && containsInt(item.GenreIDs, tmdbAnimationGenreID) {
+		if animationKnown && !requireAnimation && containsInt(item.GenreIDs, tmdbAnimationGenreID) {
 			continue
 		}
 		for _, candidate := range []string{item.Title, item.OriginalTitle, item.Name, item.OriginalName} {

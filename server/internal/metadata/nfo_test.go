@@ -158,6 +158,14 @@ func TestPickSearchResultRequiresExactAnimatedMatch(t *testing.T) {
 	}
 }
 
+func TestPickSearchResultAllowsAnimationWhenTypeUnknown(t *testing.T) {
+	items := []tmdbItem{{ID: 42, Name: "师兄啊师兄", GenreIDs: []int{tmdbAnimationGenreID}}}
+	got, ok := pickSearchResultPolicy(items, "师兄啊师兄", 0, false, false)
+	if !ok || got.ID != 42 {
+		t.Fatalf("unknown media type rejected animation candidate: got=%+v ok=%v", got, ok)
+	}
+}
+
 func TestMetadataQueryTitleFromCollections(t *testing.T) {
 	cases := map[string]struct{ title, filePath string }{
 		"十万个冷笑话": {

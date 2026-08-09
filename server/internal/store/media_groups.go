@@ -165,7 +165,7 @@ func (s *sqlStore) loadMediaGroupDetail(group MediaGroup) (MediaGroupDetail, err
 		var member MediaGroupMember
 		if err := rows.Scan(&member.GroupID, &member.ResourceID, &member.Season, &member.Episode, &member.Confidence,
 			&member.Resource.ID, &member.Resource.SourceID, &member.Resource.Title, &member.Resource.Poster,
-			&member.Resource.Overview, &member.Resource.Provider, &member.Resource.ShareURL,
+			&member.Resource.Overview, &member.Resource.SourceTitle, &member.Resource.SourceCategory, &member.Resource.Provider, &member.Resource.ShareURL,
 			&member.Resource.SharePwd, &member.Resource.FilePath, &member.Resource.CreatedAt, &member.Resource.UpdatedAt); err != nil {
 			rows.Close()
 			return detail, err

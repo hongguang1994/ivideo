@@ -63,3 +63,16 @@ func TestPipelineStagesCanBeReplacedIndependently(t *testing.T) {
 		t.Fatalf("analysis = %+v, want %+v", got, want)
 	}
 }
+
+func TestIdentityStageInheritsSourceTitleForNumberedEpisodes(t *testing.T) {
+	service := New(nil, t.TempDir(), "")
+	analysis := service.analyzePath(store.Resource{
+		Title: "146 4K", SourceTitle: "师兄啊师兄", FilePath: "/S🐻/146 4K.mp4",
+	})
+	if analysis.Info.Kind != strm.KindEpisode || analysis.Info.Title != "师兄啊师兄" || analysis.Info.Season != 1 || analysis.Info.Episode != 146 {
+		t.Fatalf("identity analysis = %+v", analysis)
+	}
+	if len(analysis.Candidates) == 0 || analysis.Candidates[0].Source != "来源标题" || !analysis.Candidates[0].AutoEligible {
+		t.Fatalf("identity candidates = %+v", analysis.Candidates)
+	}
+}

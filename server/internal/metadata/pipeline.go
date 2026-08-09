@@ -10,11 +10,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"ivideo/server/internal/mediaidentity"
 	"ivideo/server/internal/store"
 	"ivideo/server/internal/strm"
 )
 
-const pathAnalyzerVersion = "semantic-v1"
+const pathAnalyzerVersion = "semantic-v2"
 
 // PathAnalyzer turns an original resource path into structured, explainable evidence.
 type PathAnalyzer interface {
@@ -31,6 +32,7 @@ type MetadataQuery struct {
 	Title            string
 	Year             int
 	RequireAnimation bool
+	AnimationKnown   bool
 }
 
 // MetadataCandidate is the provider-neutral shape consumed by the match engine.
@@ -121,6 +123,14 @@ func WithCandidateGenerator(generator CandidateGenerator) Option {
 	}
 }
 
+func WithIdentityResolver(resolver mediaidentity.Resolver) Option {
+	return func(s *Service) {
+		if resolver != nil {
+			s.identityResolver = resolver
+		}
+	}
+}
+
 func WithMatchEngine(engine MatchEngine) Option {
 	return func(s *Service) {
 		if engine != nil {
@@ -167,7 +177,7 @@ func (strictMatchEngine) Evaluate(input MatchInput) MatchDecision {
 	if want == "" || (normalizeTitle(input.Candidate.Title) != want && normalizeTitle(input.Candidate.OriginalTitle) != want) {
 		return MatchDecision{Score: 20, Reason: "候选标题与资源标题不完全一致"}
 	}
-	if input.Query.RequireAnimation != input.Candidate.Animation {
+	if (input.Query.AnimationKnown || input.Query.RequireAnimation) && input.Query.RequireAnimation != input.Candidate.Animation {
 		return MatchDecision{Score: 0, Reason: "动画属性冲突"}
 	}
 	score := 65 // 标题 50 + 媒体类型 15
@@ -253,7 +263,41 @@ func (p doubanProvider) Search(ctx context.Context, query MetadataQuery) ([]Meta
 }
 
 func (s *Service) analyzePath(resource store.Resource) strm.PathAnalysis {
-	return s.pathAnalyzer.Analyze(resource)
+	analysis := s.pathAnalyzer.Analyze(resource)
+	candidates := make([]mediaidentity.Candidate, 0, len(analysis.Candidates))
+	for _, candidate := range analysis.Candidates {
+		candidates = append(candidates, mediaidentity.Candidate{Title: candidate.Title, Year: candidate.Year, Source: candidate.Source, Weight: candidate.Weight, AutoEligible: candidate.AutoEligible})
+	}
+	decision := s.identityResolver.Resolve(mediaidentity.Input{
+		SourceTitle: resource.SourceTitle, SourceCategory: resource.SourceCategory,
+		ResourceTitle: resource.Title, FilePath: resource.FilePath,
+		ParsedKind: string(analysis.Info.Kind), ParsedTitle: analysis.Info.Title,
+		Season: analysis.Info.Season, Episode: analysis.Info.Episode, Candidates: candidates,
+	})
+	analysis.IdentityTitle, analysis.IdentityStatus = decision.Title, decision.Status
+	analysis.IdentityReason, analysis.IdentityConfidence = decision.Reason, decision.Confidence
+	if decision.Title != "" {
+		identityCandidate := strm.TitleCandidate{Title: decision.Title, Source: "来源标题", Weight: min(15, max(1, decision.Confidence/6)), AutoEligible: decision.AutoEligible}
+		merged := []strm.TitleCandidate{identityCandidate}
+		for _, candidate := range analysis.Candidates {
+			if normalizeTitle(candidate.Title) != normalizeTitle(decision.Title) {
+				merged = append(merged, candidate)
+			}
+		}
+		analysis.Candidates = merged
+	}
+	if decision.Kind == string(strm.KindEpisode) && decision.Title != "" && decision.Confidence >= 90 {
+		analysis.Info.Kind, analysis.Info.Title = strm.KindEpisode, decision.Title
+		analysis.Info.Season, analysis.Info.Episode = decision.Season, decision.Episode
+		analysis.SeriesTitle = decision.Title
+	}
+	if decision.AnimationHint == "animation" {
+		analysis.Info.AnimationKnown = true
+		analysis.Info.OverrideLibrary = strm.LibAnime
+	} else if decision.AnimationHint == "live_action" {
+		analysis.Info.AnimationKnown = true
+	}
+	return analysis
 }
 
 func (s *Service) titleCandidates(resource store.Resource, analysis strm.PathAnalysis) []strm.TitleCandidate {

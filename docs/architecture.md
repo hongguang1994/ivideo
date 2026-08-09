@@ -13,6 +13,7 @@ flowchart LR
     Importer --> Events["eventbus"]
     Events --> Workflow["mediaworkflow"]
     Workflow --> Metadata["metadata"]
+    Metadata --> Identity["mediaidentity"]
     Workflow --> Publisher["strm"]
     Publisher --> MediaDir["data/media"]
     MediaDir --> Jellyfin["Jellyfin"]
@@ -34,6 +35,7 @@ flowchart LR
 | `internal/handlers` | HTTP 参数、响应和后台任务入口 | `Handler` |
 | `internal/resourcesearch` | 可扩展资源发现引擎 | `Source`、`Engine` |
 | `internal/importer` | 遍历分享并幂等写入资源 | `ShareSource`、`Catalog` |
+| `internal/mediaidentity` | 融合来源标题、路径与分集线索，输出可解释身份结论 | `Resolver`、`Decision` |
 | `internal/metadata` | 路径分析、候选匹配、内容复核和资料发布 | `PathAnalyzer`、`MatchEngine`、`ContentVerifier`、`MediaPublisher` |
 | `internal/strm` | 规划并发布 Jellyfin 媒体目录 | `Repository`、`Generator` |
 | `internal/mediaworkflow` | 用领域事件编排导入、刮削、发布和扫库 | `Publisher`、`Enricher`、`Library` |

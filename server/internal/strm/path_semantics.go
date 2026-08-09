@@ -34,13 +34,17 @@ type PathToken struct {
 // PathAnalysis is the single semantic view shared by grouping, metadata
 // matching and STRM layout. Raw segments are retained for explainability.
 type PathAnalysis struct {
-	Info            MediaInfo        `json:"info"`
-	Segments        []PathSegment    `json:"segments"`
-	Tokens          []PathToken      `json:"tokens"`
-	Candidates      []TitleCandidate `json:"candidates"`
-	SpecificTitle   string           `json:"specificTitle"`
-	SeriesTitle     string           `json:"seriesTitle"`
-	CollectionTitle string           `json:"collectionTitle"`
+	Info               MediaInfo        `json:"info"`
+	Segments           []PathSegment    `json:"segments"`
+	Tokens             []PathToken      `json:"tokens"`
+	Candidates         []TitleCandidate `json:"candidates"`
+	SpecificTitle      string           `json:"specificTitle"`
+	SeriesTitle        string           `json:"seriesTitle"`
+	CollectionTitle    string           `json:"collectionTitle"`
+	IdentityTitle      string           `json:"identityTitle,omitempty"`
+	IdentityStatus     string           `json:"identityStatus,omitempty"`
+	IdentityReason     string           `json:"identityReason,omitempty"`
+	IdentityConfidence int              `json:"identityConfidence,omitempty"`
 }
 
 var (

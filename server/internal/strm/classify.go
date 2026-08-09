@@ -24,6 +24,7 @@ type MediaInfo struct {
 	Season          int      // 剧集季号
 	Episode         int      // 剧集集号
 	OverrideLibrary LibraryKind
+	AnimationKnown  bool
 }
 
 var (
@@ -78,11 +79,12 @@ func ParsePath(filePath, title string) MediaInfo {
 			show = strings.TrimSpace(title)
 		}
 		return MediaInfo{
-			Kind:       KindEpisode,
-			Categories: cats,
-			Title:      show,
-			Season:     season,
-			Episode:    episode,
+			Kind:           KindEpisode,
+			Categories:     cats,
+			Title:          show,
+			Season:         season,
+			Episode:        episode,
+			AnimationKnown: animationSegments(segs),
 		}
 	}
 
@@ -96,11 +98,12 @@ func ParsePath(filePath, title string) MediaInfo {
 			season, _ := strconv.Atoi(m[1])
 			episode, _ := strconv.Atoi(m[2])
 			return MediaInfo{
-				Kind:       KindEpisode,
-				Categories: segs[:len(segs)-2],
-				Title:      showFromParents(segs),
-				Season:     season,
-				Episode:    episode,
+				Kind:           KindEpisode,
+				Categories:     segs[:len(segs)-2],
+				Title:          showFromParents(segs),
+				Season:         season,
+				Episode:        episode,
+				AnimationKnown: animationSegments(segs),
 			}
 		}
 	}
@@ -245,11 +248,12 @@ func seasonFromParents(segs []string) int {
 
 func episodeMediaInfo(segs []string, episode int) MediaInfo {
 	return MediaInfo{
-		Kind:       KindEpisode,
-		Categories: segs[:len(segs)-2],
-		Title:      showFromParents(segs),
-		Season:     seasonFromParents(segs),
-		Episode:    supplementalEpisode(segs, episode),
+		Kind:           KindEpisode,
+		Categories:     segs[:len(segs)-2],
+		Title:          showFromParents(segs),
+		Season:         seasonFromParents(segs),
+		Episode:        supplementalEpisode(segs, episode),
+		AnimationKnown: animationSegments(segs),
 	}
 }
 

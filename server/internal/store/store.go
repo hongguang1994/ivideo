@@ -58,18 +58,20 @@ var _ ShareRepository = (*sqlStore)(nil)
 
 // Resource 是一条收集来的分享资源。
 type Resource struct {
-	ID          int64  `json:"id"`
-	SourceID    int64  `json:"sourceId"`
-	Title       string `json:"title"`
-	Poster      string `json:"poster"`
-	Overview    string `json:"overview"`
-	Provider    string `json:"provider"`
-	ShareURL    string `json:"shareUrl"`
-	SharePwd    string `json:"sharePwd"`
-	FilePath    string `json:"filePath"`
-	CreatedAt   int64  `json:"createdAt"`
-	UpdatedAt   int64  `json:"updatedAt"`
-	ResourceKey string `json:"-"`
+	ID             int64  `json:"id"`
+	SourceID       int64  `json:"sourceId"`
+	Title          string `json:"title"`
+	SourceTitle    string `json:"sourceTitle,omitempty"`
+	SourceCategory string `json:"sourceCategory,omitempty"`
+	Poster         string `json:"poster"`
+	Overview       string `json:"overview"`
+	Provider       string `json:"provider"`
+	ShareURL       string `json:"shareUrl"`
+	SharePwd       string `json:"sharePwd"`
+	FilePath       string `json:"filePath"`
+	CreatedAt      int64  `json:"createdAt"`
+	UpdatedAt      int64  `json:"updatedAt"`
+	ResourceKey    string `json:"-"`
 }
 
 // ResourceMediaDecision 是作品组决定在单个资源上的只读投影。
@@ -400,13 +402,13 @@ func (s *sqlStore) AddResource(r Resource) (int64, error) {
 }
 
 const resourceCols = `r.id, r.source_id, r.title, COALESCE(r.poster,''), COALESCE(r.overview,''),
-	s.provider, s.share_url, COALESCE(s.share_pwd,''), COALESCE(r.file_path,''), r.created_at, r.updated_at`
+	COALESCE(s.title,''), COALESCE(s.category,''), s.provider, s.share_url, COALESCE(s.share_pwd,''), COALESCE(r.file_path,''), r.created_at, r.updated_at`
 
 const resourceJoin = ` FROM resources r JOIN share_sources s ON s.id = r.source_id`
 
 func scanResource(sc rowScanner) (Resource, error) {
 	var r Resource
-	err := sc.Scan(&r.ID, &r.SourceID, &r.Title, &r.Poster, &r.Overview, &r.Provider,
+	err := sc.Scan(&r.ID, &r.SourceID, &r.Title, &r.Poster, &r.Overview, &r.SourceTitle, &r.SourceCategory, &r.Provider,
 		&r.ShareURL, &r.SharePwd, &r.FilePath, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }

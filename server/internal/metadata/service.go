@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ivideo/server/internal/mediaidentity"
 	"ivideo/server/internal/store"
 	"ivideo/server/internal/strm"
 )
@@ -50,6 +51,7 @@ type Service struct {
 	candidateGenerator CandidateGenerator
 	matchEngine        MatchEngine
 	contentVerifier    ContentVerifier
+	identityResolver   mediaidentity.Resolver
 	publisher          MediaPublisher
 	running            atomic.Bool
 	contentBudget      atomic.Int32
@@ -69,7 +71,7 @@ func New(st Repository, mediaDir, siteURL string, options ...Option) *Service {
 	s := &Service{
 		store: st, mediaDir: mediaDir, siteURL: strings.TrimRight(siteURL, "/"),
 		pathAnalyzer: semanticPathAnalyzer{}, candidateGenerator: semanticCandidateGenerator{},
-		matchEngine: strictMatchEngine{}, publisher: localMediaPublisher{},
+		matchEngine: strictMatchEngine{}, identityResolver: mediaidentity.DefaultResolver{}, publisher: localMediaPublisher{},
 	}
 	s.contentVerifier = serviceContentVerifier{service: s}
 	for _, option := range options {
@@ -177,7 +179,8 @@ func (s *Service) SearchCandidates(ctx context.Context, groupID int64, query str
 		kind = "movie"
 	}
 	provider := tmdbProvider{client: newTMDb(cred.Token)}
-	results, err := provider.Search(ctx, MetadataQuery{Kind: kind, Title: query, Year: detail.Group.Year, RequireAnimation: detail.Group.SuggestedLibrary == string(strm.LibAnime)})
+	knownType := detail.Group.SuggestedLibrary != "" && detail.Group.SuggestedLibrary != string(strm.LibReview)
+	results, err := provider.Search(ctx, MetadataQuery{Kind: kind, Title: query, Year: detail.Group.Year, RequireAnimation: detail.Group.SuggestedLibrary == string(strm.LibAnime), AnimationKnown: knownType})
 	if err != nil {
 		return detail, err
 	}
@@ -188,7 +191,7 @@ func (s *Service) SearchCandidates(ctx context.Context, groupID int64, query str
 			break
 		}
 		decision := s.matchEngine.Evaluate(MatchInput{
-			Query:     MetadataQuery{Kind: kind, Title: query, Year: detail.Group.Year, RequireAnimation: requireAnimation},
+			Query:     MetadataQuery{Kind: kind, Title: query, Year: detail.Group.Year, RequireAnimation: requireAnimation, AnimationKnown: knownType},
 			Candidate: item, PathWeight: 12, PathAutoEligible: true,
 		})
 		library := strm.LibTV
@@ -339,6 +342,28 @@ func (s *Service) run(ctx context.Context) (result Result, runErr error) {
 			return result, fmt.Errorf("保存作品组 %s: %w", group.info.Title, err)
 		}
 		group.id = groupID
+		for _, resource := range group.resources {
+			analysis := analyses[resource.ID]
+			status := "neutral"
+			if analysis.IdentityStatus == "identified" {
+				status = "supporting"
+			}
+			evidence, _ := json.Marshal(map[string]any{
+				"sourceTitle": resource.SourceTitle, "sourceCategory": resource.SourceCategory,
+				"identityTitle": analysis.IdentityTitle, "confidence": analysis.IdentityConfidence,
+				"path": resource.FilePath,
+			})
+			_ = s.store.RecordMediaVerification(store.MediaVerification{
+				GroupID: groupID, ResourceID: resource.ID, Verifier: "media_identity",
+				VerifierVersion: mediaidentity.ResolverVersion, Status: status,
+				ScoreDelta: analysis.IdentityConfidence, Reason: analysis.IdentityReason,
+				EvidenceJSON: string(evidence),
+			})
+			_ = s.store.RecordMediaProcessingStep(store.MediaProcessingStep{
+				JobID: job.ID, GroupID: groupID, ResourceID: resource.ID,
+				Stage: "identity_decision", Status: "completed",
+			})
+		}
 	}
 	if _, err := s.store.DeleteOrphanMediaGroups(); err != nil {
 		return result, fmt.Errorf("清理旧作品组: %w", err)
@@ -683,6 +708,10 @@ func requiresAnimation(info strm.MediaInfo) bool {
 	return info.IsAnime()
 }
 
+func animationKnown(info strm.MediaInfo) bool {
+	return strm.ValidLibrary(string(info.OverrideLibrary)) || info.AnimationKnown || info.IsAnime()
+}
+
 func (s *Service) takeContentBudget() bool {
 	for {
 		left := s.contentBudget.Load()
@@ -704,7 +733,7 @@ func matchConfidence(query string, year int, found tmdbItem) (int, string) {
 // type conflict cannot be compensated for by weaker signals.
 func matchConfidenceWithEvidence(query string, year int, found tmdbItem, pathWeight int, requireAnimation bool) (int, string) {
 	decision := (strictMatchEngine{}).Evaluate(MatchInput{
-		Query:     MetadataQuery{Title: query, Year: year, RequireAnimation: requireAnimation},
+		Query:     MetadataQuery{Title: query, Year: year, RequireAnimation: requireAnimation, AnimationKnown: true},
 		Candidate: metadataCandidateFromTMDb(found), PathWeight: pathWeight, PathAutoEligible: true,
 	})
 	return decision.Score, decision.Reason
@@ -741,7 +770,8 @@ func (s *Service) findTMDbMatch(ctx context.Context, c *tmdbClient, g *mediaGrou
 		}
 		queryYear := firstNonZero(query.Year, g.info.Year)
 		metadataResults, searchErr := provider.Search(ctx, MetadataQuery{
-			Kind: kind, Title: query.Title, Year: queryYear, RequireAnimation: requiresAnimation(g.info),
+			Kind: kind, Title: query.Title, Year: queryYear,
+			RequireAnimation: requiresAnimation(g.info), AnimationKnown: animationKnown(g.info),
 		})
 		if searchErr != nil {
 			lastErr = searchErr
@@ -754,7 +784,7 @@ func (s *Service) findTMDbMatch(ctx context.Context, c *tmdbClient, g *mediaGrou
 			if !ok {
 				continue
 			}
-			if picked, matches := pickSearchResult([]tmdbItem{item}, query.Title, queryYear, requiresAnimation(g.info)); matches {
+			if picked, matches := pickSearchResultPolicy([]tmdbItem{item}, query.Title, queryYear, requiresAnimation(g.info), animationKnown(g.info)); matches {
 				found, selected = picked, candidate
 				break
 			}
@@ -765,7 +795,8 @@ func (s *Service) findTMDbMatch(ctx context.Context, c *tmdbClient, g *mediaGrou
 			continue
 		}
 		decision := s.matchEngine.Evaluate(MatchInput{
-			Query:     MetadataQuery{Kind: kind, Title: query.Title, Year: queryYear, RequireAnimation: requiresAnimation(g.info)},
+			Query: MetadataQuery{Kind: kind, Title: query.Title, Year: queryYear,
+				RequireAnimation: requiresAnimation(g.info), AnimationKnown: animationKnown(g.info)},
 			Candidate: selected, PathWeight: query.Weight, PathAutoEligible: query.AutoEligible,
 		})
 		score, matchReason := decision.Score, decision.Reason

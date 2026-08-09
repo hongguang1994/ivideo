@@ -26,6 +26,29 @@ func TestShareSourceKeyNormalizesURL(t *testing.T) {
 	}
 }
 
+func TestResourceIncludesShareSourceIdentityContext(t *testing.T) {
+	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	shareURL := "https://pan.example.com/s/identity"
+	if _, err := st.AddShare(Share{Title: "师兄啊师兄", Category: "国漫", Provider: "quark", ShareURL: shareURL}); err != nil {
+		t.Fatal(err)
+	}
+	resourceID, err := st.AddResource(Resource{Title: "146 4K", Provider: "quark", ShareURL: shareURL, FilePath: "/S🐻/146 4K.mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := st.GetResource(resourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource.SourceTitle != "师兄啊师兄" || resource.SourceCategory != "国漫" {
+		t.Fatalf("missing source context: %+v", resource)
+	}
+}
+
 func TestDeleteShareKeepsImportedResource(t *testing.T) {
 	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
 	if err != nil {
