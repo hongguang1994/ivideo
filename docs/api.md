@@ -78,6 +78,7 @@
 | GET | `/settings/search` | 搜索引擎设置 |
 | POST/DELETE | `/settings/search/github` | 保存/删除 GitHub token |
 | GET/PUT | `/settings/search/rss` | RSS / Atom 订阅源和定时采集设置 |
+| POST | `/settings/search/rss/discover` | 从站点主页或订阅地址发现并验证 RSS / Atom 源 |
 | POST | `/settings/search/rss/run` | 立即采集 RSS / Atom 订阅源 |
 
 扫码授权接口位于 `/auth/aliyun/*`、`/auth/aliyun/open/*`、`/auth/115/*` 和 `/auth/quark/*`。

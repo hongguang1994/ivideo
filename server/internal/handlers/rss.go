@@ -112,6 +112,29 @@ func (h *Handler) RSSSettings(c *gin.Context) {
 	resp.OK(c, payload)
 }
 
+// DiscoverRSSFeeds samples a site or direct feed before the user saves it.
+func (h *Handler) DiscoverRSSFeeds(c *gin.Context) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, http.StatusBadRequest, "请输入站点或订阅地址")
+		return
+	}
+	if h.rssSource == nil {
+		resp.Fail(c, http.StatusServiceUnavailable, "RSS 模块未启用")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	candidates, err := h.rssSource.Discover(ctx, req.URL)
+	if err != nil {
+		resp.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.OK(c, gin.H{"items": candidates})
+}
+
 // SaveRSSSettings replaces the configured public feeds. Article fetching only
 // follows same-host article URLs, which avoids turning a feed into an open crawler.
 func (h *Handler) SaveRSSSettings(c *gin.Context) {

@@ -4,8 +4,20 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
+
+func TestAdvertisedFeedURLsFindsAlternateFeedAndDeduplicates(t *testing.T) {
+	items, err := advertisedFeedURLs("https://example.com/blog/", []byte(`<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body><a href="/feed.xml">RSS</a></body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"https://example.com/feed.xml", "https://example.com/feed", "https://example.com/rss", "https://example.com/rss.xml", "https://example.com/atom.xml", "https://example.com/index.xml"}
+	if !reflect.DeepEqual(items, want) {
+		t.Fatalf("unexpected feed URLs: %#v", items)
+	}
+}
 
 func TestRSSSourceCollectsDirectShare(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

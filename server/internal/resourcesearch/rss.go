@@ -18,6 +18,16 @@ const RSSFeedsSettingKey = "discovery.rss.feeds"
 
 const maxRSSArticleFetches = 20
 
+// RSSFeedCandidate describes a feed found from a website and sampled before it
+// is saved. It lets a user decide whether the source is worth subscribing to.
+type RSSFeedCandidate struct {
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Format     string `json:"format"`
+	EntryCount int    `json:"entryCount"`
+	ShareCount int    `json:"shareCount"`
+}
+
 // RSSFeed is one public RSS or Atom feed configured by the user.
 type RSSFeed struct {
 	ID           string `json:"id"`
@@ -59,6 +69,126 @@ func (s *RSSSource) Search(ctx context.Context, query string) ([]SourceResult, M
 // background collector before results are written into ivideo's local index.
 func (s *RSSSource) Collect(ctx context.Context) ([]SourceResult, Meta, error) {
 	return s.collect(ctx, "")
+}
+
+// Discover finds and samples RSS/Atom feeds advertised by a public website.
+// It accepts either a feed URL directly or a normal site page containing a
+// standard alternate-feed link. It intentionally does not search the web.
+func (s *RSSSource) Discover(ctx context.Context, rawURL string) ([]RSSFeedCandidate, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if !validFeedURL(rawURL) {
+		return nil, fmt.Errorf("请输入有效的 HTTP 或 HTTPS 地址")
+	}
+	body, err := s.get(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(body, 2<<20))
+	body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if entries, err := parseFeed(data); err == nil {
+		return []RSSFeedCandidate{sampleRSSFeed(rawURL, entries)}, nil
+	}
+
+	urls, err := advertisedFeedURLs(rawURL, data)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]RSSFeedCandidate, 0, len(urls))
+	for _, feedURL := range urls {
+		entries, err := s.fetchFeed(ctx, RSSFeed{Name: feedURL, URL: feedURL})
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, sampleRSSFeed(feedURL, entries))
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("没有找到可读取的 RSS 或 Atom 订阅；请粘贴站点提供的订阅地址")
+	}
+	return candidates, nil
+}
+
+func sampleRSSFeed(feedURL string, entries []feedEntry) RSSFeedCandidate {
+	parsed, _ := url.Parse(feedURL)
+	name := parsed.Hostname()
+	shares := 0
+	for _, entry := range entries {
+		shares += len(extractShareResults(entry.searchText(), entry.Title))
+	}
+	return RSSFeedCandidate{
+		Name: name, URL: feedURL, Format: feedFormat(feedURL), EntryCount: len(entries), ShareCount: shares,
+	}
+}
+
+func feedFormat(value string) string {
+	lower := strings.ToLower(value)
+	if strings.Contains(lower, "atom") {
+		return "Atom"
+	}
+	return "RSS / Atom"
+}
+
+func advertisedFeedURLs(pageURL string, data []byte) ([]string, error) {
+	document, err := html.Parse(strings.NewReader(string(data)))
+	if err != nil {
+		return nil, err
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	urls := make([]string, 0, 8)
+	appendURL := func(value string) {
+		if len(urls) >= 10 || strings.TrimSpace(value) == "" {
+			return
+		}
+		parsed, err := url.Parse(strings.TrimSpace(value))
+		if err != nil {
+			return
+		}
+		resolved := base.ResolveReference(parsed)
+		if !validFeedURL(resolved.String()) {
+			return
+		}
+		key := strings.ToLower(resolved.String())
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		urls = append(urls, resolved.String())
+	}
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if node.Type == html.ElementNode {
+			href := attr(node, "href")
+			if href != "" && isFeedLink(node, href) {
+				appendURL(href)
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(document)
+	for _, suffix := range []string{"/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/index.xml"} {
+		appendURL(suffix)
+	}
+	return urls, nil
+}
+
+func isFeedLink(node *html.Node, href string) bool {
+	if node.Data == "link" {
+		rel := strings.ToLower(attr(node, "rel"))
+		kind := strings.ToLower(attr(node, "type"))
+		if strings.Contains(rel, "alternate") && (strings.Contains(kind, "rss") || strings.Contains(kind, "atom") || strings.Contains(kind, "xml")) {
+			return true
+		}
+	}
+	lower := strings.ToLower(href)
+	return strings.Contains(lower, "rss") || strings.Contains(lower, "atom") || strings.Contains(lower, "feed") || strings.HasSuffix(lower, ".xml")
 }
 
 func (s *RSSSource) collect(ctx context.Context, query string) ([]SourceResult, Meta, error) {

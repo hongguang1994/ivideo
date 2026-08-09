@@ -21,6 +21,7 @@ func registerSettings(api *gin.RouterGroup, h *handlers.Handler) {
 	api.POST("/settings/search/github", h.SaveGitHubToken)
 	api.DELETE("/settings/search/github", h.DeleteGitHubToken)
 	api.GET("/settings/search/rss", h.RSSSettings)
+	api.POST("/settings/search/rss/discover", h.DiscoverRSSFeeds)
 	api.PUT("/settings/search/rss", h.SaveRSSSettings)
 	api.POST("/settings/search/rss/run", h.RunRSSCollection)
 	api.GET("/settings/import", h.ImportSettings)

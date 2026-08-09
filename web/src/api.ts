@@ -459,8 +459,20 @@ export interface RSSSettingsStatus {
   status: RSSCollectionStatus;
 }
 
+export interface RSSFeedCandidate {
+  name: string;
+  url: string;
+  format: string;
+  entryCount: number;
+  shareCount: number;
+}
+
 export function getRSSSettings(): Promise<RSSSettingsStatus> {
   return apiFetch<RSSSettingsStatus>("/settings/search/rss");
+}
+
+export function discoverRSSFeeds(url: string): Promise<{ items: RSSFeedCandidate[] }> {
+  return post<{ items: RSSFeedCandidate[] }>("/settings/search/rss/discover", { url });
 }
 
 export function saveRSSSettings(feeds: RSSFeed[], schedule: RSSSchedule): Promise<RSSSettingsStatus> {
