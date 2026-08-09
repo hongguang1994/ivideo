@@ -7,18 +7,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+
+	"ivideo/server/internal/resp"
 )
 
 // StreamSearch 按 jobId 推送渐进式搜索快照。GET /api/v1/search/resources/ws
 func (h *Handler) StreamSearch(c *gin.Context) {
 	jobID := strings.TrimSpace(c.Query("jobId"))
 	if jobID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "缺少 jobId"})
+		resp.Fail(c, http.StatusBadRequest, "缺少 jobId")
 		return
 	}
 	current, stream, unsubscribe, err := h.discovery.Subscribe(jobID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": err.Error()})
+		resp.Fail(c, http.StatusNotFound, err.Error())
 		return
 	}
 	connection, err := websocketUpgrader.Upgrade(c.Writer, c.Request, nil)
