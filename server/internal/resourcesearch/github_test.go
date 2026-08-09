@@ -1,6 +1,9 @@
 package resourcesearch
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractShareResults(t *testing.T) {
 	content := `凡人修仙传
@@ -47,5 +50,14 @@ https://pan.quark.cn/s/other`
 	results := extractMatchingShareResults(content, "霍比特人3")
 	if len(results) != 1 || results[0].Provider != "aliyun" {
 		t.Fatalf("nearby title was not used: %#v", results)
+	}
+}
+
+func TestBuildGitHubCodeQueryTargetsSupportedShareDomains(t *testing.T) {
+	query := buildGitHubCodeQuery("师兄啊师兄")
+	for _, expected := range []string{`"师兄啊师兄"`, "alipan.com/s/", "aliyundrive.com/s/", "pan.quark.cn/s/", "115.com/s/", "NOT is:fork"} {
+		if !strings.Contains(query, expected) {
+			t.Fatalf("query missing %q: %s", expected, query)
+		}
 	}
 }

@@ -15,8 +15,9 @@ import (
 
 const (
 	githubAPI         = "https://api.github.com"
-	maxGitHubFiles    = 15
+	maxGitHubFiles    = 24
 	maxGitHubFileSize = 2 << 20
+	maxGitHubPages    = 2
 )
 
 var (
@@ -38,7 +39,9 @@ func NewGitHub(token string) *GitHubProvider {
 }
 
 type githubSearchResponse struct {
-	Items []struct {
+	TotalCount        int  `json:"total_count"`
+	IncompleteResults bool `json:"incomplete_results"`
+	Items             []struct {
 		Name       string `json:"name"`
 		Path       string `json:"path"`
 		URL        string `json:"url"`
@@ -59,48 +62,63 @@ func (g *GitHubProvider) Search(ctx context.Context, query string) ([]SourceResu
 		return nil, Meta{Source: "github"}, fmt.Errorf("未配置 GitHub Token")
 	}
 
-	endpoint := githubAPI + "/search/code?q=" + url.QueryEscape(query+" in:file") + "&per_page=30"
-	response, remaining, resetAt, err := g.request(ctx, endpoint, "application/vnd.github+json")
-	if err != nil {
-		return nil, Meta{Source: "github", Remaining: remaining, ResetAt: resetAt}, err
-	}
-	defer response.Close()
-	var search githubSearchResponse
-	if err := json.NewDecoder(response).Decode(&search); err != nil {
-		return nil, Meta{Source: "github", Remaining: remaining, ResetAt: resetAt}, fmt.Errorf("解析 GitHub 搜索结果失败: %w", err)
-	}
-
 	results := make([]SourceResult, 0)
 	seen := make(map[string]bool)
 	scanned := 0
-	for _, item := range search.Items {
-		if scanned >= maxGitHubFiles {
-			break
+	remaining, resetAt := -1, int64(0)
+	for page := 1; page <= maxGitHubPages && scanned < maxGitHubFiles; page++ {
+		endpoint := githubAPI + "/search/code?q=" + url.QueryEscape(buildGitHubCodeQuery(query)) + "&per_page=100&page=" + strconv.Itoa(page)
+		response, pageRemaining, pageResetAt, err := g.request(ctx, endpoint, "application/vnd.github+json")
+		if err != nil {
+			return results, Meta{Source: "github", Scanned: scanned, Remaining: pageRemaining, ResetAt: pageResetAt}, err
 		}
-		body, _, _, fetchErr := g.request(ctx, item.URL, "application/vnd.github.raw+json")
-		if fetchErr != nil {
-			continue
+		remaining, resetAt = pageRemaining, pageResetAt
+		var search githubSearchResponse
+		decodeErr := json.NewDecoder(response).Decode(&search)
+		response.Close()
+		if decodeErr != nil {
+			return results, Meta{Source: "github", Scanned: scanned, Remaining: remaining, ResetAt: resetAt}, fmt.Errorf("解析 GitHub 搜索结果失败: %w", decodeErr)
 		}
-		content, readErr := io.ReadAll(io.LimitReader(body, maxGitHubFileSize+1))
-		body.Close()
-		if readErr != nil || len(content) > maxGitHubFileSize {
-			continue
-		}
-		scanned++
-		for _, found := range extractMatchingShareResults(string(content), query) {
-			if seen[found.ShareURL] {
+		for _, item := range search.Items {
+			if scanned >= maxGitHubFiles {
+				break
+			}
+			body, _, _, fetchErr := g.request(ctx, item.URL, "application/vnd.github.raw+json")
+			if fetchErr != nil {
 				continue
 			}
-			seen[found.ShareURL] = true
-			found.TitleBasis = TitleBasisQuery
-			found.Evidence = append(found.Evidence, "github:code-match")
-			found.Repository = item.Repository.FullName
-			found.Path = item.Path
-			found.SourceURL = item.HTMLURL
-			results = append(results, found)
+			content, readErr := io.ReadAll(io.LimitReader(body, maxGitHubFileSize+1))
+			body.Close()
+			if readErr != nil || len(content) > maxGitHubFileSize {
+				continue
+			}
+			scanned++
+			for _, found := range extractMatchingShareResults(string(content), query) {
+				if seen[found.ShareURL] {
+					continue
+				}
+				seen[found.ShareURL] = true
+				found.TitleBasis = TitleBasisQuery
+				found.Evidence = append(found.Evidence, "github:code-match")
+				found.Repository = item.Repository.FullName
+				found.Path = item.Path
+				found.SourceURL = item.HTMLURL
+				results = append(results, found)
+			}
+		}
+		if len(search.Items) < 100 || search.IncompleteResults {
+			break
 		}
 	}
 	return results, Meta{Source: "github", Scanned: scanned, Remaining: remaining, ResetAt: resetAt}, nil
+}
+
+// buildGitHubCodeQuery searches the title together with actual supported share
+// domains. This filters out generic title mentions and makes the limited code
+// search quota count toward files that can produce playable public shares.
+func buildGitHubCodeQuery(title string) string {
+	title = strings.ReplaceAll(strings.TrimSpace(title), "\"", "\\\"")
+	return fmt.Sprintf(`"%s" (content:"alipan.com/s/" OR content:"aliyundrive.com/s/" OR content:"pan.quark.cn/s/" OR content:"115.com/s/") NOT is:fork`, title)
 }
 
 // CheckToken 通过只读限额接口确认 Token 可被 GitHub 接受。
