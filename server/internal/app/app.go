@@ -56,19 +56,22 @@ func New(cfg config.Config, st store.Store) (*gin.Engine, error) {
 	discovery, rssSource := buildDiscovery(cfg, st, cm, metadataService)
 	h := handlers.New(cfg, ol, jf, st, cm, importService, metadataService, workflowService, discovery, rssSource)
 
+	// 先确保媒体库存在，再生成 strm。生成器只在实际写入/删除时通知
+	// Jellyfin 扫库，避免启动时的“生成 + 显式扫描”重复执行。
+	if jf != nil {
+		if err := jf.EnsureLibraries(cfg.MediaDir); err != nil {
+			slog.Warn("确保 Jellyfin 媒体库失败", "err", err)
+		} else {
+			slog.Info("Jellyfin 媒体库已就绪")
+		}
+	}
+
 	// strm 媒体库自动维护：启动时生成一次 + 定时兜底（导入完成后也会即时触发）。
 	h.StartAutoStrm(cfg.StrmAutoInterval)
 	h.StartShareChecks(cfg.ShareCheckInterval)
 	h.StartImportScheduler()
 	h.StartRSSScheduler()
 	if jf != nil {
-		if err := jf.EnsureLibraries(cfg.MediaDir); err != nil {
-			slog.Warn("确保 Jellyfin 媒体库失败", "err", err)
-		} else if err := jf.RefreshLibrary(); err != nil {
-			slog.Warn("首次扫描 Jellyfin 媒体库失败", "err", err)
-		} else {
-			slog.Info("Jellyfin 媒体库已就绪")
-		}
 		if removed, err := jf.RemoveMissingItems(cfg.MediaDir); err != nil {
 			slog.Warn("清理 Jellyfin 旧索引失败", "err", err)
 		} else if removed > 0 {

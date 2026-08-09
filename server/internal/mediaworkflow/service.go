@@ -127,9 +127,9 @@ func (s *Service) onMetadataVerified(ctx context.Context, event eventbus.Event) 
 			failures = append(failures, err)
 		}
 	}
-	if err := s.library.Refresh(ctx); err != nil {
-		failures = append(failures, err)
-	}
+	// Publish emits MediaPublished, whose handler refreshes Jellyfin only when
+	// the generated STRM set changed. Do not scan a second time here: image
+	// refresh above is item-scoped, while a full library scan is expensive.
 	return errors.Join(failures...)
 }
 

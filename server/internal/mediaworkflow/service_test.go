@@ -67,7 +67,7 @@ func TestImportedResourcesFlowThroughReplaceableModules(t *testing.T) {
 	if len(library.images) != 1 || len(library.images[0]) != 1 {
 		t.Fatalf("expected image refresh, got %#v", library.images)
 	}
-	if library.refreshes < 2 {
-		t.Fatalf("expected library refreshes after changed publications, got %d", library.refreshes)
+	if library.refreshes != 2 {
+		t.Fatalf("expected one library refresh per changed publication, got %d", library.refreshes)
 	}
 }
