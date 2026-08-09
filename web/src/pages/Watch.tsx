@@ -16,6 +16,8 @@ export default function Watch() {
   const [streamUrl, setStreamUrl] = useState("");
   const [isHls, setIsHls] = useState(false);
   const [msg, setMsg] = useState("");
+  const [retryAfter, setRetryAfter] = useState(0);
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -25,11 +27,13 @@ export default function Watch() {
         const r = await playResource(Number(rid));
         setStatus(r.status);
         setMsg(r.message || "");
+        setRetryAfter(r.retryAfterSeconds || 0);
         if (r.status === "ready" && r.streamUrl) {
           setStreamUrl(r.streamUrl);
           setIsHls(r.type === "hls");
           if (pollRef.current) clearInterval(pollRef.current);
         }
+        if (r.status === "failed" && pollRef.current) clearInterval(pollRef.current);
       } catch (e) {
         setMsg(String((e as Error).message || e));
       }
@@ -39,7 +43,13 @@ export default function Watch() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [rid]);
+  }, [rid, retryAttempt]);
+
+  useEffect(() => {
+    if (retryAfter <= 0) return;
+    const timer = window.setInterval(() => setRetryAfter((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [retryAfter > 0]);
 
   if (rid) {
     return (
@@ -48,11 +58,21 @@ export default function Watch() {
           <Link to="/resources" style={{ color: "var(--accent)" }}>⬅ 返回资源库</Link>
         </div>
         {streamUrl ? (
-          <Player src={streamUrl} name={name} hls={isHls} />
+          <Player src={streamUrl} name={name} hls={isHls} onError={setMsg} />
         ) : (
           <div className="qr-box" style={{ background: "var(--surface)", color: "var(--text)" }}>
             <p>{status === "failed" ? "❌ " : "⏳ "}{msg || "正在转存到你的网盘…"}</p>
             <p className="muted" style={{ fontSize: 13 }}>状态: {status || "请求中"}</p>
+            {status === "failed" && (
+              <>
+                <p className="muted" style={{ fontSize: 13 }}>
+                  {retryAfter > 0 ? `为避免重复请求网盘，将在 ${retryAfter} 秒后允许重试。` : "现在可以重新尝试。"}
+                </p>
+                <button type="button" className="btn" disabled={retryAfter > 0} onClick={() => setRetryAttempt((n) => n + 1)}>
+                  重新尝试
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

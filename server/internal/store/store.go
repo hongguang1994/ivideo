@@ -282,15 +282,17 @@ type MediaAlias struct {
 
 // CacheItem 是某资源的转存缓存状态。
 type CacheItem struct {
-	ResourceID int64  `json:"resourceId"`
-	Backend    string `json:"backend"`
-	Status     string `json:"status"`
-	CachePath  string `json:"cachePath"`
-	DirectURL  string `json:"-"` // 不直接暴露给前端
-	Size       int64  `json:"size"`
-	LastAccess int64  `json:"lastAccess"`
-	Error      string `json:"error"`
-	UpdatedAt  int64  `json:"updatedAt"`
+	ResourceID  int64  `json:"resourceId"`
+	Backend     string `json:"backend"`
+	Status      string `json:"status"`
+	CachePath   string `json:"cachePath"`
+	DirectURL   string `json:"-"` // 不直接暴露给前端
+	Size        int64  `json:"size"`
+	LastAccess  int64  `json:"lastAccess"`
+	Error       string `json:"error"`
+	FailCount   int    `json:"failCount"`
+	NextRetryAt int64  `json:"nextRetryAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
 }
 
 // Open 按驱动(sqlite / mysql)打开数据库并建表，返回 Store 接口。
@@ -321,6 +323,10 @@ func Open(driver, dsn string) (Store, error) {
 		}
 	}
 	if err := execSchema(db, d.schema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := upgradeCacheSchema(db, d); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -451,10 +457,10 @@ func (s *sqlStore) GetCacheItem(resourceID int64) (CacheItem, error) {
 	var c CacheItem
 	err := s.db.QueryRow(
 		`SELECT resource_id, backend, status, COALESCE(cache_path,''), COALESCE(direct_url,''),
-		        size, last_access, COALESCE(error, ''), updated_at
+		        size, last_access, COALESCE(error, ''), fail_count, next_retry_at, updated_at
 		 FROM cache_items WHERE resource_id = ?`, resourceID).
 		Scan(&c.ResourceID, &c.Backend, &c.Status, &c.CachePath, &c.DirectURL,
-			&c.Size, &c.LastAccess, &c.Error, &c.UpdatedAt)
+			&c.Size, &c.LastAccess, &c.Error, &c.FailCount, &c.NextRetryAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return CacheItem{ResourceID: resourceID, Status: StatusUncached}, nil
 	}
@@ -467,8 +473,11 @@ func (s *sqlStore) SetTransferring(resourceID int64, backend string) error {
 }
 
 // SetFailed 标记为失败并记录原因。
-func (s *sqlStore) SetFailed(resourceID int64, backend, errMsg string) error {
-	return s.upsertStatus(resourceID, backend, StatusFailed, errMsg)
+func (s *sqlStore) SetFailed(resourceID int64, backend, errMsg string, failCount int, nextRetryAt int64) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(s.d.upsertFailed,
+		resourceID, backend, StatusFailed, errMsg, failCount, nextRetryAt, now)
+	return err
 }
 
 // SetReady 标记为就绪，写入路径/直链/大小，并刷新访问时间。
@@ -498,7 +507,7 @@ func (s *sqlStore) MarkCleaned(resourceID int64) error {
 func (s *sqlStore) ListReady() ([]CacheItem, error) {
 	rows, err := s.db.Query(
 		`SELECT resource_id, backend, status, COALESCE(cache_path,''), COALESCE(direct_url,''),
-		        size, last_access, COALESCE(error, ''), updated_at
+		        size, last_access, COALESCE(error, ''), fail_count, next_retry_at, updated_at
 		 FROM cache_items WHERE status = ? ORDER BY last_access ASC`, StatusReady)
 	if err != nil {
 		return nil, err
@@ -509,7 +518,7 @@ func (s *sqlStore) ListReady() ([]CacheItem, error) {
 	for rows.Next() {
 		var c CacheItem
 		if err := rows.Scan(&c.ResourceID, &c.Backend, &c.Status, &c.CachePath, &c.DirectURL,
-			&c.Size, &c.LastAccess, &c.Error, &c.UpdatedAt); err != nil {
+			&c.Size, &c.LastAccess, &c.Error, &c.FailCount, &c.NextRetryAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

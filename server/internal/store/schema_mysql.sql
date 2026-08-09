@@ -157,6 +157,8 @@ CREATE TABLE IF NOT EXISTS cache_items (
     size        BIGINT       NOT NULL DEFAULT 0,-- 字节
     last_access BIGINT       NOT NULL DEFAULT 0,-- 最后播放时间(unix 秒),用于 LRU
     error       VARCHAR(1024) NOT NULL DEFAULT '', -- 最近一次失败原因
+    fail_count  INT          NOT NULL DEFAULT 0,    -- 连续失败次数，用于退避
+    next_retry_at BIGINT     NOT NULL DEFAULT 0,    -- 下次可自动重试时间(unix 秒)
     updated_at  BIGINT       NOT NULL,
     INDEX idx_cache_status_access (status, last_access),
     CONSTRAINT fk_cache_items_resource

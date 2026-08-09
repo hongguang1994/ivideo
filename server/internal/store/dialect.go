@@ -16,6 +16,7 @@ type dialect struct {
 
 	upsertReady      string // SetReady
 	upsertStatus     string // SetTransferring / SetFailed
+	upsertFailed     string // SetFailed with retry state
 	upsertCredential string // SetCredential
 	upsertCredToken  string // SetCredentialToken
 }
@@ -32,16 +33,21 @@ func mustSchema(name string) string {
 var sqliteDialect = dialect{
 	driver: "sqlite",
 	schema: mustSchema("schema.sql"),
-	upsertReady: `INSERT INTO cache_items (resource_id, backend, status, cache_path, direct_url, size, last_access, error, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?)
+	upsertReady: `INSERT INTO cache_items (resource_id, backend, status, cache_path, direct_url, size, last_access, error, fail_count, next_retry_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, ?)
 		 ON CONFLICT(resource_id) DO UPDATE SET
 		    backend=excluded.backend, status=excluded.status, cache_path=excluded.cache_path,
 		    direct_url=excluded.direct_url, size=excluded.size, last_access=excluded.last_access,
-		    error='', updated_at=excluded.updated_at`,
+		    error='', fail_count=0, next_retry_at=0, updated_at=excluded.updated_at`,
 	upsertStatus: `INSERT INTO cache_items (resource_id, backend, status, size, last_access, error, updated_at)
 		 VALUES (?, ?, ?, 0, 0, ?, ?)
 		 ON CONFLICT(resource_id) DO UPDATE SET
 		    backend=excluded.backend, status=excluded.status, error=excluded.error, updated_at=excluded.updated_at`,
+	upsertFailed: `INSERT INTO cache_items (resource_id, backend, status, size, last_access, error, fail_count, next_retry_at, updated_at)
+		 VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?)
+		 ON CONFLICT(resource_id) DO UPDATE SET
+		    backend=excluded.backend, status=excluded.status, error=excluded.error,
+		    fail_count=excluded.fail_count, next_retry_at=excluded.next_retry_at, updated_at=excluded.updated_at`,
 	upsertCredential: `INSERT INTO provider_credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(provider) DO UPDATE SET token=excluded.token, extra=excluded.extra, updated_at=excluded.updated_at`,
 	upsertCredToken: `INSERT INTO provider_credentials (provider, token, updated_at) VALUES (?, ?, ?)
@@ -52,16 +58,21 @@ var sqliteDialect = dialect{
 var mysqlDialect = dialect{
 	driver: "mysql",
 	schema: mustSchema("schema_mysql.sql"),
-	upsertReady: `INSERT INTO cache_items (resource_id, backend, status, cache_path, direct_url, size, last_access, error, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?)
+	upsertReady: `INSERT INTO cache_items (resource_id, backend, status, cache_path, direct_url, size, last_access, error, fail_count, next_retry_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, ?)
 		 ON DUPLICATE KEY UPDATE
 		    backend=VALUES(backend), status=VALUES(status), cache_path=VALUES(cache_path),
 		    direct_url=VALUES(direct_url), size=VALUES(size), last_access=VALUES(last_access),
-		    error='', updated_at=VALUES(updated_at)`,
+		    error='', fail_count=0, next_retry_at=0, updated_at=VALUES(updated_at)`,
 	upsertStatus: `INSERT INTO cache_items (resource_id, backend, status, size, last_access, error, updated_at)
 		 VALUES (?, ?, ?, 0, 0, ?, ?)
 		 ON DUPLICATE KEY UPDATE
 		    backend=VALUES(backend), status=VALUES(status), error=VALUES(error), updated_at=VALUES(updated_at)`,
+	upsertFailed: `INSERT INTO cache_items (resource_id, backend, status, size, last_access, error, fail_count, next_retry_at, updated_at)
+		 VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		    backend=VALUES(backend), status=VALUES(status), error=VALUES(error),
+		    fail_count=VALUES(fail_count), next_retry_at=VALUES(next_retry_at), updated_at=VALUES(updated_at)`,
 	upsertCredential: `INSERT INTO provider_credentials (provider, token, extra, updated_at) VALUES (?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE token=VALUES(token), extra=VALUES(extra), updated_at=VALUES(updated_at)`,
 	upsertCredToken: `INSERT INTO provider_credentials (provider, token, updated_at) VALUES (?, ?, ?)

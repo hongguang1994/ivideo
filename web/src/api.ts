@@ -118,6 +118,7 @@ export interface PlayResp {
   streamUrl?: string;
   type?: "hls" | "direct";
   message?: string;
+  retryAfterSeconds?: number;
 }
 
 // 触发/查询转存;就绪返回 streamUrl。

@@ -5,10 +5,12 @@ export default function Player({
   src,
   name,
   hls,
+  onError,
 }: {
   src: string;
   name: string;
   hls?: boolean;
+  onError?: (message: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -19,6 +21,7 @@ export default function Player({
     const isHls = hls || src.toLowerCase().includes(".m3u8");
     if (!isHls || video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = src;
+      video.onerror = () => onError?.("播放器无法加载媒体流，请稍后重试或检查网盘授权。");
       return;
     }
 
@@ -32,6 +35,9 @@ export default function Player({
       }
       const player = new Hls();
       destroy = () => player.destroy();
+      player.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) onError?.("播放器无法加载媒体流，请稍后重试或检查网盘授权。");
+      });
       player.loadSource(src);
       player.attachMedia(video);
     });
@@ -39,7 +45,7 @@ export default function Player({
       disposed = true;
       destroy?.();
     };
-  }, [src, hls]);
+  }, [src, hls, onError]);
 
   return (
     <video className="player" ref={videoRef} controls autoPlay title={name} />

@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS cache_items (
     size        INTEGER NOT NULL DEFAULT 0, -- 字节
     last_access INTEGER NOT NULL DEFAULT 0, -- 最后播放时间（unix 秒），用于 LRU
     error       TEXT,                       -- 最近一次失败原因
+    fail_count  INTEGER NOT NULL DEFAULT 0, -- 连续失败次数，用于退避
+    next_retry_at INTEGER NOT NULL DEFAULT 0, -- 下次可自动重试时间(unix 秒)
     updated_at  INTEGER NOT NULL,
     FOREIGN KEY (resource_id) REFERENCES resources (id) ON DELETE CASCADE
 );

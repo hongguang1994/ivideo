@@ -12,7 +12,7 @@ type ResourceRepository interface {
 type CacheRepository interface {
 	GetCacheItem(resourceID int64) (CacheItem, error)
 	SetTransferring(resourceID int64, backend string) error
-	SetFailed(resourceID int64, backend, errMsg string) error
+	SetFailed(resourceID int64, backend, errMsg string, failCount int, nextRetryAt int64) error
 	SetReady(resourceID int64, backend, cachePath, directURL string, size int64) error
 	TouchAccess(resourceID int64) error
 	MarkCleaned(resourceID int64) error

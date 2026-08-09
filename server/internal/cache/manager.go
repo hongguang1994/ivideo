@@ -34,7 +34,7 @@ type Repository interface {
 	GetResource(id int64) (store.Resource, error)
 	GetCacheItem(resourceID int64) (store.CacheItem, error)
 	SetTransferring(resourceID int64, backend string) error
-	SetFailed(resourceID int64, backend, errMsg string) error
+	SetFailed(resourceID int64, backend, errMsg string, failCount int, nextRetryAt int64) error
 	SetReady(resourceID int64, backend, cachePath, directURL string, size int64) error
 	TouchAccess(resourceID int64) error
 	MarkCleaned(resourceID int64) error
@@ -99,6 +99,10 @@ func (m *Manager) EnsureReady(resourceID int64) (store.CacheItem, error) {
 	// 就绪 = 已转存(cache_path 已写)。直链在播放时实时取（HLS 地址会过期，不入库）。
 	if item.Status == store.StatusReady && item.CachePath != "" {
 		_ = m.store.TouchAccess(resourceID)
+		return item, nil
+	}
+
+	if item.Status == store.StatusFailed && item.NextRetryAt > time.Now().Unix() {
 		return item, nil
 	}
 
@@ -292,10 +296,32 @@ func (m *Manager) startTransfer(res store.Resource) {
 		tr, err := m.backend.Transfer(ctx, share)
 		if err != nil {
 			slog.Error("转存失败", "resource", res.ID, "err", err)
-			_ = m.store.SetFailed(res.ID, m.backend.Name(), err.Error())
+			item, getErr := m.store.GetCacheItem(res.ID)
+			if getErr != nil {
+				slog.Error("读取转存失败状态", "resource", res.ID, "err", getErr)
+				return
+			}
+			failCount := item.FailCount + 1
+			retryAt := time.Now().Add(retryDelay(failCount)).Unix()
+			if setErr := m.store.SetFailed(res.ID, m.backend.Name(), err.Error(), failCount, retryAt); setErr != nil {
+				slog.Error("记录转存失败状态", "resource", res.ID, "err", setErr)
+			}
 			return
 		}
 		_ = m.store.SetReady(res.ID, m.backend.Name(), tr.CachePath, "", tr.Size)
 		slog.Info("转存就绪", "resource", res.ID, "path", tr.CachePath, "size", tr.Size)
 	}()
+}
+
+// retryDelay limits repeated provider calls after a transfer failure. Successful
+// transfers reset the counter, while persistent failures eventually retry hourly.
+func retryDelay(failCount int) time.Duration {
+	delays := []time.Duration{5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour}
+	if failCount <= 0 {
+		return delays[0]
+	}
+	if failCount > len(delays) {
+		return delays[len(delays)-1]
+	}
+	return delays[failCount-1]
 }

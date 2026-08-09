@@ -104,6 +104,39 @@ func TestSQLiteResourceDeduplicationAndCacheForeignKey(t *testing.T) {
 	}
 }
 
+func TestCacheFailureRetryState(t *testing.T) {
+	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	id, err := st.AddResource(Resource{Title: "Example", Provider: "aliyun", ShareURL: "https://pan.example.com/s/retry", FilePath: "/video.mkv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFailed(id, "aliyun", "provider busy", 2, 12345); err != nil {
+		t.Fatal(err)
+	}
+	item, err := st.GetCacheItem(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Status != StatusFailed || item.FailCount != 2 || item.NextRetryAt != 12345 {
+		t.Fatalf("unexpected retry state: %+v", item)
+	}
+	if err := st.SetReady(id, "aliyun", "/cache/video.mkv", "", 1); err != nil {
+		t.Fatal(err)
+	}
+	item, err = st.GetCacheItem(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.FailCount != 0 || item.NextRetryAt != 0 || item.Error != "" {
+		t.Fatalf("success should reset retry state: %+v", item)
+	}
+}
+
 func TestMediaGroupLifecycle(t *testing.T) {
 	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
 	if err != nil {

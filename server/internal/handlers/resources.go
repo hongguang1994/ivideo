@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -85,6 +86,9 @@ func (h *Handler) Play(c *gin.Context) {
 		out["message"] = "正在转存到网盘，请稍候…"
 	case store.StatusFailed:
 		out["message"] = "转存失败：" + item.Error
+		if item.NextRetryAt > time.Now().Unix() {
+			out["retryAfterSeconds"] = item.NextRetryAt - time.Now().Unix()
+		}
 	}
 	resp.OK(c, out)
 }
