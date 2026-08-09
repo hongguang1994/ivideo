@@ -31,6 +31,87 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at    BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 规范化资源目录：链接实体、发现证据、健康历史与文件树分开保存。
+CREATE TABLE IF NOT EXISTS discovery_sources (
+    id           BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    source_type  VARCHAR(32) NOT NULL,
+    source_key   VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL DEFAULT '',
+    enabled      TINYINT(1) NOT NULL DEFAULT 1,
+    config_json  TEXT NOT NULL,
+    created_at   BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
+    UNIQUE KEY uniq_discovery_source (source_type, source_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shares (
+    id               BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    provider         VARCHAR(32) NOT NULL,
+    share_url        VARCHAR(1024) NOT NULL,
+    share_pwd        VARCHAR(64) NOT NULL DEFAULT '',
+    share_id         VARCHAR(128) NOT NULL DEFAULT '',
+    canonical_key    CHAR(64) NOT NULL,
+    legacy_source_id BIGINT NULL,
+    status           VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    first_seen_at    BIGINT NOT NULL,
+    last_seen_at     BIGINT NOT NULL,
+    UNIQUE KEY uniq_shares_key (canonical_key),
+    UNIQUE KEY uniq_shares_legacy_source (legacy_source_id),
+    INDEX idx_shares_provider_share_id (provider, share_id),
+    INDEX idx_shares_status_seen (status, last_seen_at),
+    CONSTRAINT fk_shares_legacy_source FOREIGN KEY (legacy_source_id) REFERENCES share_sources(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS share_observations (
+    id                  BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    share_id            BIGINT NOT NULL,
+    discovery_source_id BIGINT NOT NULL,
+    source_ref          VARCHAR(1024) NOT NULL DEFAULT '',
+    source_ref_key      CHAR(64) NOT NULL,
+    title               VARCHAR(512) NOT NULL DEFAULT '',
+    category            VARCHAR(255) NOT NULL DEFAULT '',
+    file_name           VARCHAR(1024) NOT NULL DEFAULT '',
+    metadata_json       TEXT NOT NULL,
+    active              TINYINT(1) NOT NULL DEFAULT 1,
+    first_seen_at       BIGINT NOT NULL,
+    last_seen_at        BIGINT NOT NULL,
+    UNIQUE KEY uniq_share_observation (share_id, discovery_source_id, source_ref_key),
+    INDEX idx_share_observations_source_active (discovery_source_id, active),
+    INDEX idx_share_observations_share_active (share_id, active),
+    CONSTRAINT fk_share_observations_share FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE,
+    CONSTRAINT fk_share_observations_source FOREIGN KEY (discovery_source_id) REFERENCES discovery_sources(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS share_health_checks (
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    share_id    BIGINT NOT NULL,
+    status      VARCHAR(16) NOT NULL,
+    entry_count INT NOT NULL DEFAULT 0,
+    total_size  BIGINT NOT NULL DEFAULT 0,
+    message     VARCHAR(1024) NOT NULL DEFAULT '',
+    checked_at  BIGINT NOT NULL,
+    INDEX idx_share_health_checks_share_checked (share_id, checked_at),
+    CONSTRAINT fk_share_health_checks_share FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS share_items (
+    id            BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    share_id      BIGINT NOT NULL,
+    path          VARCHAR(2048) NOT NULL,
+    path_key      CHAR(64) NOT NULL,
+    parent_path   VARCHAR(1024) NOT NULL DEFAULT '',
+    name          VARCHAR(1024) NOT NULL,
+    item_type     VARCHAR(16) NOT NULL,
+    size          BIGINT NOT NULL DEFAULT 0,
+    extension     VARCHAR(32) NOT NULL DEFAULT '',
+    first_seen_at BIGINT NOT NULL,
+    last_seen_at  BIGINT NOT NULL,
+    UNIQUE KEY uniq_share_item (share_id, path_key),
+    INDEX idx_share_items_share_parent (share_id, parent_path(200)),
+    INDEX idx_share_items_name (name(200)),
+    CONSTRAINT fk_share_items_share FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- GitHub 采集源：仅记录仓库索引、文本文件 SHA 与分享链接来源，不存视频文件。
 CREATE TABLE IF NOT EXISTS github_repositories (
     id                BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,

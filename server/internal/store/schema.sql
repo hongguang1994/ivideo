@@ -21,6 +21,85 @@ CREATE TABLE IF NOT EXISTS share_sources (
 CREATE INDEX IF NOT EXISTS idx_sources_bookmarked_created ON share_sources (is_bookmarked, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sources_provider_share_id ON share_sources (provider, share_id);
 
+-- 规范化资源目录：链接实体、发现证据、健康历史与真实文件树分离。
+CREATE TABLE IF NOT EXISTS discovery_sources (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type  TEXT NOT NULL,
+    source_key   TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    config_json  TEXT NOT NULL DEFAULT '{}',
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    UNIQUE (source_type, source_key)
+);
+
+CREATE TABLE IF NOT EXISTS shares (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider         TEXT NOT NULL,
+    share_url        TEXT NOT NULL,
+    share_pwd        TEXT NOT NULL DEFAULT '',
+    share_id         TEXT NOT NULL DEFAULT '',
+    canonical_key    TEXT NOT NULL UNIQUE,
+    legacy_source_id INTEGER UNIQUE,
+    status           TEXT NOT NULL DEFAULT 'unknown',
+    first_seen_at    INTEGER NOT NULL,
+    last_seen_at     INTEGER NOT NULL,
+    FOREIGN KEY (legacy_source_id) REFERENCES share_sources (id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shares_provider_share_id ON shares (provider, share_id);
+CREATE INDEX IF NOT EXISTS idx_shares_status_seen ON shares (status, last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS share_observations (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    share_id            INTEGER NOT NULL,
+    discovery_source_id INTEGER NOT NULL,
+    source_ref          TEXT NOT NULL DEFAULT '',
+    source_ref_key      TEXT NOT NULL DEFAULT '',
+    title               TEXT NOT NULL DEFAULT '',
+    category            TEXT NOT NULL DEFAULT '',
+    file_name           TEXT NOT NULL DEFAULT '',
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    active              INTEGER NOT NULL DEFAULT 1,
+    first_seen_at       INTEGER NOT NULL,
+    last_seen_at        INTEGER NOT NULL,
+    UNIQUE (share_id, discovery_source_id, source_ref_key),
+    FOREIGN KEY (share_id) REFERENCES shares (id) ON DELETE CASCADE,
+    FOREIGN KEY (discovery_source_id) REFERENCES discovery_sources (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_share_observations_source_active ON share_observations (discovery_source_id, active);
+CREATE INDEX IF NOT EXISTS idx_share_observations_share_active ON share_observations (share_id, active);
+
+CREATE TABLE IF NOT EXISTS share_health_checks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    share_id     INTEGER NOT NULL,
+    status       TEXT NOT NULL,
+    entry_count  INTEGER NOT NULL DEFAULT 0,
+    total_size   INTEGER NOT NULL DEFAULT 0,
+    message      TEXT NOT NULL DEFAULT '',
+    checked_at   INTEGER NOT NULL,
+    FOREIGN KEY (share_id) REFERENCES shares (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_share_health_checks_share_checked ON share_health_checks (share_id, checked_at DESC);
+
+CREATE TABLE IF NOT EXISTS share_items (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    share_id     INTEGER NOT NULL,
+    path         TEXT NOT NULL,
+    path_key     TEXT NOT NULL,
+    parent_path  TEXT NOT NULL DEFAULT '',
+    name         TEXT NOT NULL,
+    item_type    TEXT NOT NULL,
+    size         INTEGER NOT NULL DEFAULT 0,
+    extension    TEXT NOT NULL DEFAULT '',
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at  INTEGER NOT NULL,
+    UNIQUE (share_id, path_key),
+    FOREIGN KEY (share_id) REFERENCES shares (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_share_items_share_parent ON share_items (share_id, parent_path);
+CREATE INDEX IF NOT EXISTS idx_share_items_name ON share_items (name);
+
 -- GitHub 采集源：仓库、文件 SHA 与解析出的分享链接分层保存。
 -- 只保存文本清单和结构化结果，绝不下载网盘视频文件。
 CREATE TABLE IF NOT EXISTS github_repositories (

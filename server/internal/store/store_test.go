@@ -26,6 +26,25 @@ func TestShareSourceKeyNormalizesURL(t *testing.T) {
 	}
 }
 
+func TestAddShareAlsoCreatesCanonicalShareAndObservation(t *testing.T) {
+	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.AddShare(Share{Provider: "quark", ShareURL: "https://pan.quark.cn/s/catalog", Title: "示例作品", Category: "动漫"}); err != nil {
+		t.Fatal(err)
+	}
+	db := st.(*sqlStore).db
+	var shares, observations int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM shares`).Scan(&shares); err != nil || shares != 1 {
+		t.Fatalf("canonical shares=%d err=%v", shares, err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM share_observations`).Scan(&observations); err != nil || observations != 1 {
+		t.Fatalf("canonical observations=%d err=%v", observations, err)
+	}
+}
+
 func TestResourceIncludesShareSourceIdentityContext(t *testing.T) {
 	st, err := Open("sqlite", filepath.Join(t.TempDir(), "ivideo.db"))
 	if err != nil {

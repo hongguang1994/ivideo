@@ -328,6 +328,10 @@ func Open(driver, dsn string) (Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := backfillCanonicalShareCatalog(db, d); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := upgradeCacheSchema(db, d); err != nil {
 		db.Close()
 		return nil, err

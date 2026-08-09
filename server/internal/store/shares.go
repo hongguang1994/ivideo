@@ -33,6 +33,9 @@ func (s *sqlStore) AddShare(sh Share) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if err := s.syncCanonicalLegacySource(tx, id, now); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -68,7 +71,11 @@ func (s *sqlStore) SyncShares(shares []Share) (added, existing int, err error) {
 		} else if lookupErr != sql.ErrNoRows {
 			return 0, 0, lookupErr
 		}
-		if _, err := ensureShareSource(tx, sh, true, now); err != nil {
+		sourceID, err := ensureShareSource(tx, sh, true, now)
+		if err != nil {
+			return 0, 0, err
+		}
+		if err := s.syncCanonicalLegacySource(tx, sourceID, now); err != nil {
 			return 0, 0, err
 		}
 		if lookupErr == sql.ErrNoRows {
