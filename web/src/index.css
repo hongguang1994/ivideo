@@ -44,6 +44,14 @@ a { color: inherit; text-decoration: none; }
   grid-template-rows: 64px minmax(0, 1fr);
   transition: grid-template-columns 160ms ease;
 }
+.access-gate-loading { display: flex; min-height: 100vh; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 14px; }
+.access-gate { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: #f8f8f8; }
+.access-gate form { display: flex; width: min(100%, 390px); flex-direction: column; gap: 13px; padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.access-gate-icon { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 50%; background: #f2e9e8; color: var(--accent); }
+.access-gate h1 { margin: 4px 0 0; font-size: 24px; }
+.access-gate p { margin: 0 0 4px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.access-gate button { justify-content: center; }
+.access-gate-error { color: #ba342d; font-size: 12px; }
 .app-shell.sidebar-closed { --sidebar-width: 76px; }
 .app-shell.settings-mode { --sidebar-width: 0px; grid-template-columns: minmax(0, 1fr); }
 

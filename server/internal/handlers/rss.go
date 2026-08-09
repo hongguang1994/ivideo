@@ -129,7 +129,7 @@ func (h *Handler) DiscoverRSSFeeds(c *gin.Context) {
 	defer cancel()
 	candidates, err := h.rssSource.Discover(ctx, req.URL)
 	if err != nil {
-		resp.Fail(c, http.StatusBadRequest, err.Error())
+		resp.Fail(c, http.StatusBadRequest, "无法读取或验证该订阅地址")
 		return
 	}
 	resp.OK(c, gin.H{"items": candidates})

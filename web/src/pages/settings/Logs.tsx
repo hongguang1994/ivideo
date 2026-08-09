@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
+import { webSocketAccessQuery } from "../../api";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -59,7 +60,7 @@ export default function Logs() {
       if (disposed) return;
       setStatus("connecting");
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const connection = new WebSocket(`${protocol}//${window.location.host}/api/v1/logs/ws`);
+      const connection = new WebSocket(`${protocol}//${window.location.host}/api/v1/logs/ws?${webSocketAccessQuery()}`);
       socket = connection;
       connection.onopen = () => setStatus("connected");
       connection.onmessage = (event) => {

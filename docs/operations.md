@@ -4,7 +4,7 @@
 
 后端配置优先级为：默认值 < YAML 配置 < 环境变量。嵌套键会转换为大写下划线环境变量，例如 `openlist.base_url` 对应 `OPENLIST_BASE_URL`。
 
-- `.env`：仅放 Docker Compose 启动所需的 MySQL 密码和 `DB_DSN`。
+- `.env`：放 Docker Compose 启动所需的 MySQL 密码、`DB_DSN` 与 `SERVER_API_KEY`。
 - `data/server/conf.yaml`：后端业务配置。
 - 数据库 `provider_credentials`：网盘、Jellyfin、TMDb 和 GitHub 令牌。
 
@@ -22,6 +22,7 @@ docker compose up -d --build
 必要配置：
 
 - `.env` 中 `MYSQL_ROOT_PASSWORD` 与 `DB_DSN` 密码一致。
+- `.env` 中设置随机、长度至少 32 个字符的 `SERVER_API_KEY`；浏览器首次打开 ivideo 时输入该密钥。
 - `db.driver` 使用 `mysql`。
 - `site_url` 填 Jellyfin 可访问的 ivideo 网关地址，不能在 Docker 中写 `localhost`。
 - 正式使用将 `cache.backend` 设置为 `aliyun`；`fake` 只用于本地联调。

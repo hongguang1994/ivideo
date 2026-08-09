@@ -34,7 +34,7 @@ mkdir -p data/server
 cp server/configs/conf.example.yaml data/server/conf.yaml
 ```
 
-1. 修改 `.env` 中的 MySQL 密码和 `DB_DSN`。
+1. 修改 `.env` 中的 MySQL 密码、`DB_DSN` 和随机生成的 `SERVER_API_KEY`。
 2. 修改 `data/server/conf.yaml` 中的 `site_url`。它必须是 Jellyfin 容器能够访问的 ivideo 地址，例如 `http://192.168.50.140:8090`。
 3. 启动服务：
 
@@ -93,7 +93,7 @@ data/jellyfin/cache/    Jellyfin 缓存和刮削缓存
 
 ## 注意事项
 
-- 当前项目定位为可信内网自用，业务 API 尚未增加独立登录鉴权，不应直接暴露到公网。
+- 当前项目使用单个内网访问密钥保护业务 API；它不是多用户权限系统，仍不应直接暴露到公网。
 - 网盘和第三方服务令牌保存在数据库中；`.env`、`data/` 和本地配置已加入 `.gitignore`。
 - STRM 发布是全量但幂等的：输入未变化时不会重写文件或触发 Jellyfin 扫库。
 - 媒体匹配置信度不足时会进入“待整理”，不会强行套用可能错误的在线元数据。

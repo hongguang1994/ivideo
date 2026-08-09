@@ -68,6 +68,7 @@ services:
     environment:
       - GIN_MODE=release   # Gin 框架自身的环境变量，非 viper 配置
       - DB_DSN=${DB_DSN:?请在 .env 设置 DB_DSN}
+      - SERVER_API_KEY=${SERVER_API_KEY:-}
     volumes:
       - ./data/server:/data
       - ./data/media:/media

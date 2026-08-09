@@ -10,7 +10,8 @@ import (
 
 // Config 保存后端运行所需的全部配置（来自默认值 / 配置文件 / 环境变量）。
 type Config struct {
-	Port string // 后端监听端口
+	Port   string // 后端监听端口
+	APIKey string // 内网 API 访问密钥；留空只允许本地开发
 
 	OpenListBaseURL  string // OpenList 服务地址，例如 http://openlist:5244
 	OpenListUsername string // OpenList 登录用户名
@@ -146,6 +147,7 @@ func newViper(cfgFile string) (*viper.Viper, error) {
 // setDefaults 注册所有配置键及默认值。
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", "3001")
+	v.SetDefault("server.api_key", "")
 
 	v.SetDefault("openlist.base_url", "http://openlist:5244")
 	v.SetDefault("openlist.username", "admin")
@@ -217,6 +219,7 @@ func Load(cfgFile string) (Config, error) {
 	}
 	cfg := Config{
 		Port:             v.GetString("server.port"),
+		APIKey:           strings.TrimSpace(v.GetString("server.api_key")),
 		OpenListBaseURL:  strings.TrimRight(v.GetString("openlist.base_url"), "/"),
 		OpenListUsername: v.GetString("openlist.username"),
 		OpenListPassword: v.GetString("openlist.password"),

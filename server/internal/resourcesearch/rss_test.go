@@ -32,6 +32,7 @@ func TestRSSSourceCollectsDirectShare(t *testing.T) {
 	source := NewRSSSource(func(context.Context) ([]RSSFeed, error) {
 		return []RSSFeed{{ID: "test", Name: "测试订阅", URL: server.URL + "/feed.xml", Enabled: true}}, nil
 	})
+	source.client = server.Client()
 	items, meta, err := source.Collect(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +63,7 @@ func TestRSSSourceCanReadSameHostArticle(t *testing.T) {
 	source := NewRSSSource(func(context.Context) ([]RSSFeed, error) {
 		return []RSSFeed{{ID: "test", Name: "测试订阅", URL: server.URL + "/feed.xml", Enabled: true, FetchArticle: true}}, nil
 	})
+	source.client = server.Client()
 	items, _, err := source.Collect(context.Background())
 	if err != nil {
 		t.Fatal(err)

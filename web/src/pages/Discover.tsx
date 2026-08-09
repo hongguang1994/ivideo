@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   addSharesBatch,
   searchResources,
+  webSocketAccessQuery,
   type BatchShareResponse,
   type SearchResource,
   type SearchResponse,
@@ -78,7 +79,8 @@ export default function Discover({ variant = "search", showHeader = true }: { va
 	const connect = (jobId: string) => {
 		if (disposed || !jobPending) return;
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-		const connection = new WebSocket(`${protocol}//${window.location.host}/api/v1/search/resources/ws?jobId=${encodeURIComponent(jobId)}`);
+		const accessQuery = webSocketAccessQuery();
+		const connection = new WebSocket(`${protocol}//${window.location.host}/api/v1/search/resources/ws?jobId=${encodeURIComponent(jobId)}${accessQuery ? `&${accessQuery}` : ""}`);
 		socket = connection;
 		connection.onmessage = (event) => {
 			const envelope = JSON.parse(event.data) as { type: "snapshot"; data?: SearchResponse };

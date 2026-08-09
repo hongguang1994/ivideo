@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/net/html"
+
+	"ivideo/server/internal/safehttp"
 )
 
 const RSSFeedsSettingKey = "discovery.rss.feeds"
@@ -49,7 +51,7 @@ type RSSSource struct {
 func NewRSSSource(load RSSFeedLoader) *RSSSource {
 	return &RSSSource{
 		load:   load,
-		client: &http.Client{Timeout: 12 * time.Second},
+		client: safehttp.NewExternalClient(12 * time.Second),
 	}
 }
 
